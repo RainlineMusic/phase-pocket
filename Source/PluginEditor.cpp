@@ -16,6 +16,11 @@ juce::Font uiFont(float size){
 #endif
     return font;
 }
+// Written as raw UTF-8 bytes on purpose: a \u escape in a narrow literal gets
+// transcoded to the compiler's execution charset (MSVC without /utf-8 turns it
+// into '?'), which is exactly how the dials lost their infinity sign.
+constexpr const char* kInfinity="\xe2\x88\x9e";
+constexpr const char* kMinusInfinity="-\xe2\x88\x9e";
 void text(juce::Graphics& g,const juce::String& s,juce::Rectangle<float> r,float size,juce::Colour c,int align=juce::Justification::centredLeft,float glow=0.f){
     g.setFont(uiFont(size));
     if(glow>0.f){g.setColour(c.withAlpha(glow));const float o[8][2]={{-1,0},{1,0},{0,-1},{0,1},{-1,-1},{1,1},{-1,1},{1,-1}};for(auto& d:o)g.drawText(s,r.translated(d[0],d[1]),align);}
@@ -73,7 +78,7 @@ void ModernDial::paint(juce::Graphics& g){
     float proportion=float(valueToProportionOfLength(getValue())),start=juce::MathConstants<float>::pi*1.25f,end=start+juce::MathConstants<float>::pi*1.5f*proportion;juce::Path track,arc;track.addCentredArc(c.x,c.y,ring,ring,0,start,juce::MathConstants<float>::pi*2.75f,true);stroke(g,track,look.pick(0xff050a11,0xff101010,0xffc7c8ca),(compact?4.f:6.f)*s);
     if(proportion>0){arc.addCentredArc(c.x,c.y,ring,ring,0,start,end,true);auto a=look.isNeon()?juce::Colour(accent):look.pick(0,0xffe8e8e8,0xff303235);if(look.isNeon()){stroke(g,arc,a.withAlpha(.10f),(compact?8.f:14.f)*s);stroke(g,arc,a.withAlpha(.18f),(compact?6.f:9.f)*s);g.setGradientFill(juce::ColourGradient(a.brighter(.2f),c.x-r,c.y+r,juce::Colour(0xff8c86ed),c.x+r,c.y-r,false));}else g.setColour(a);g.strokePath(arc,juce::PathStrokeType((compact?3.5f:5.f)*s,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));}
     auto marker=juce::Point<float>(c.x+ring*std::sin(end),c.y-ring*std::cos(end));g.setColour(look.pick(0xffdeebff,0xfff4f4f4,0xff303030));g.fillEllipse(marker.x-(compact?3.5f:5.5f)*s,marker.y-(compact?3.5f:5.5f)*s,(compact?7.f:11.f)*s,(compact?7.f:11.f)*s);
-    const bool showInfinity=infinity&&((infinityAtMin&&proportion<.0005f)||(!infinityAtMin&&proportion>.9995f));juce::String value;if(showInfinity)value=juce::String::fromUTF8(infinityAtMin?"-\u221e":"\u221e");else if(unit=="dB")value=juce::String(double(juce::roundToInt(getValue()*100.))/100.,2);else value=juce::String(getValue(),unit=="%"?1:0)+(unit=="%"?"%":" ms");
+    const bool showInfinity=infinity&&((infinityAtMin&&proportion<.0005f)||(!infinityAtMin&&proportion>.9995f));juce::String value;if(showInfinity)value=juce::String::fromUTF8(infinityAtMin?kMinusInfinity:kInfinity);else if(unit=="dB")value=juce::String(double(juce::roundToInt(getValue()*100.))/100.,2);else value=juce::String(getValue(),unit=="%"?1:0)+(unit=="%"?"%":" ms");
     if(compact){text(g,title,{c.x-r,c.y-22*s,2*r,15*s},12*s,look.ink(),juce::Justification::centred);text(g,value,{c.x-r,c.y-7*s,2*r,23*s},19*s,look.ink(),juce::Justification::centred);text(g,subtitle,{c.x-r,c.y+16*s,2*r,13*s},10*s,look.muted(),juce::Justification::centred);}else{text(g,title,{c.x-r,c.y-46*s,2*r,25*s},18*s,look.ink(),juce::Justification::centred);text(g,value,{c.x-r,c.y-19*s,2*r,43*s},unit=="%"?33*s:30*s,look.ink(),juce::Justification::centred);text(g,subtitle,{c.x-r,c.y+28*s,2*r,23*s},13*s,look.muted(),juce::Justification::centred);}
 }
 DuckPocketAudioProcessorEditor::DuckPocketAudioProcessorEditor(DuckPocketAudioProcessor& p):AudioProcessorEditor(&p),audioProcessor(p){
