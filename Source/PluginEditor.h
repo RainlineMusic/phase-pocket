@@ -4,7 +4,7 @@
 enum class PocketTheme { Neon, SolidDark, SolidWhite };
 class PocketLook final:public juce::LookAndFeel_V4 {
 public:
-    PocketTheme theme=PocketTheme::Neon;
+    PocketTheme theme=PocketTheme::SolidDark;
     bool isDark() const{return theme!=PocketTheme::SolidWhite;}bool isNeon() const{return theme==PocketTheme::Neon;}
     juce::Colour pick(juce::uint32 neon,juce::uint32 dark,juce::uint32 white) const;
     juce::Colour ink() const;juce::Colour muted() const;juce::Colour accent() const;
@@ -39,7 +39,7 @@ private:
     ModernDial outputGain{look,"Output","dB","dB",0xfff1e84b,true,true,true};
     ResettableRangeSlider sidechainRange,processingRange;juce::Slider midSide;
     juce::TextButton settingsButton{"settings"},bypassButton{"power"},panelButton{"panel"};
-    juce::TextButton freezeGainButton{"freeze"},freezeScopeButton{"freeze"};
+    juce::TextButton freezeButton{"freeze"};
     std::unique_ptr<SliderAttachment> influenceAttach,durationAttach,outputAttach,msAttach;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttach;
     std::unique_ptr<juce::ParameterAttachment> lowAttach,highAttach,processLowAttach,processHighAttach;
@@ -53,7 +53,7 @@ private:
     std::vector<float> bucketLo,bucketHi;
     void timerCallback() override;void syncRange();void syncProcessingRange();void saveSize();
     void setTheme(PocketTheme,bool persist=true);void showSettingsMenu();void setHistoryWindow(bool gain,double seconds);void captureBlurSnapshot();
-    void setFrozen(bool gain,bool frozen);void invalidateChrome();void paintChrome(juce::Graphics&);
+    void setFrozen(bool frozen);void invalidateChrome();void paintChrome(juce::Graphics&);
     void panel(juce::Graphics&,juce::Rectangle<float>);void graph(juce::Graphics&,juce::Rectangle<float>,bool);
     juce::Rectangle<int> scaled(float,float,float,float) const;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DuckPocketAudioProcessorEditor)
