@@ -11,7 +11,7 @@ class Engine {
     struct Delayed { std::array<float,2> dry{},key{}; };
     struct Peak { std::uint64_t index=0; float value=0; };
     SidechainFilter filter;
-    CrossoverSplitter processingFilter;
+    DynamicBandFilter processingFilter;
     std::vector<Delayed> delay;
     std::vector<Peak> peaks;
     size_t write=0,head=0,tail=0;
@@ -81,17 +81,20 @@ public:
         const float reduction=targetBypass>.5f?0.f:std::clamp(effectiveDepth(amount)*smoothedControl,0.f,1.f);
         const float gm=1-reduction*(1-std::max(0.f,ms)),gs=1-reduction*(1+std::min(0.f,ms));
         const float mid=(result.dry[0]+result.dry[1])*.5f,side=(result.dry[0]-result.dry[1])*.5f;
-        std::array<float,2> rest{};
-        const auto band=processingFilter.process({mid,side},rest);
+        // v0.9: the dry path is never filtered. The band filter only extracts the
+        // selection, which is then subtracted by the amount of ducking:
+        //     out = dry - (1 - g) * selection
+        // With the handles parked the selection weights are zero and mix is zero, so
+        // this collapses back to the plain wideband duck, bit for bit.
+        const auto band=processingFilter.process({mid,side});
         const float mix=processingFilter.blend();
-        const float wideMid=gm*mid,wideSide=gs*side;
-        const float splitMid=rest[0]+gm*band[0],splitSide=rest[1]+gs*band[1];
-        const float processedMid=wideMid+(splitMid-wideMid)*mix,processedSide=wideSide+(splitSide-wideSide)*mix;
+        const float selectMid=mid+(band[0]-mid)*mix,selectSide=side+(band[1]-side)*mix;
+        const float processedMid=mid-(1-gm)*selectMid,processedSide=side-(1-gs)*selectSide;
         result.out={processedMid+processedSide,processedMid-processedSide};
         // The meter follows the gain the engine asked for, so the history stays the
-        // same whether the reduction runs wideband or inside a crossover band.
+        // same whether the reduction runs wideband or inside the selected band.
         result.gain=std::clamp((gm+gs)*.5f,0.f,1.f);
-        if(reduction==0&&mix<=0){result.out=result.dry;result.gain=1;}
+        if(reduction==0){result.out=result.dry;result.gain=1;}
         if(targetBypass>.5f){result.out=result.dry;result.gain=1;}else{result.out[0]*=outputGain;result.out[1]*=outputGain;}
         write=read;++clock;return result;
     }

@@ -2,9 +2,9 @@
 #include <JuceHeader.h>
 #include "PocketDSP.h"
 struct PocketTrace {float inLo=0,inHi=0,keyLo=0,keyHi=0,outLo=0,outHi=0,gain=1;double time=0;};
-class PhasePocketAudioProcessor final : public juce::AudioProcessor {
+class DuckPocketAudioProcessor final : public juce::AudioProcessor {
 public:
-    PhasePocketAudioProcessor();
+    DuckPocketAudioProcessor();
     bool popTrace(PocketTrace&);
     std::atomic<bool> displayBypass{false},editorOpen{false};
     std::atomic<int> editorWidth{0};
@@ -29,5 +29,5 @@ private:
     void processAudio(juce::AudioBuffer<float>&,juce::MidiBuffer&,bool);
     juce::AbstractFifo fifo{4096};std::array<PocketTrace,4096> traces{};
     PocketTrace capture;double traceTime=0;int captured=0,decimation=40;
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PhasePocketAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DuckPocketAudioProcessor)
 };
