@@ -1,26 +1,31 @@
-# Phase Pocket 0.6
+# Duck Pocket 0.10
 
-Experimental JUCE 8.0.4 sidechain VST3 by Rainline Music.
+JUCE 8.0.4 sidechain VST3 / AAX by Rainline Music.
 
-## v0.6
+## v0.10
 
-- Dynamic VST3 latency is driven by the Mode parameter itself: Amplitude reports 0 samples and Spectrum reports 2048 samples. UI clicks, host automation and restored state all use the same message-thread notification path.
-- Spectrum adds a delayed 12 ms amplitude transient guard before handing control to the FFT reduction curve. This reduces the initial kick/bass sum peak but is not a true-peak limiter.
-- Smoothing controls movement inside an active event and no longer extends the sidechain after the event has ended. Event end uses a short 4 ms fade and an adaptive, peak-relative detector.
-- New Duration and Sustain parameters are appended after all existing IDs. Duration defaults to infinity (the 2000 ms maximum position); Sustain defaults to 100%, preserving existing sessions. Finite Duration shortens drum sidechains and Sustain controls the retained tail.
-- The editor has a new dark navy visual system based on layered gradients, recessed panels, electric-blue/cyan/violet accents, four large controls, spectral response and one-second output/key scope.
-- CI runs baseline/v0.4/v0.5/v0.6 DSP regression, universal macOS and Windows x64 builds, and pluginval strictness 5 on pushes and pull requests.
+- Display-synchronised UI capped at 60 fps.
+- High-resolution 2.4 kHz graph capture, 16k history, per-pixel min/max aggregation and interpolated curved envelopes.
+- Perspective tunnel graph grid in every theme.
+- New warm Amber theme alongside Neon, Solid Dark and Solid White.
+- Click-free 2.5 ms latency-aligned bypass crossfade.
+- Duration automation is latched per event and cannot jump an active envelope.
+- Both audio channels are represented in the oscilloscope.
+- Dynamic filters use parked fast paths; the processor uses pointer-based block access.
+- High-DPI chrome uses the actual graphics-context scale and is not regenerated while range handles are dragged.
+- M/S percentages, centred range titles, edge-aligned live frequency labels, and persistent expanded-panel state.
+- Deprecated parameter IDs remain loadable but are marked as non-automatable metadata.
+
+See `V010-NOTES.md` for implementation details and test coverage.
 
 ## Processing
 
-Amplitude follows the current filtered sidechain envelope with zero added algorithmic latency. Spectrum uses a 2048-sample FFT reconstruction with 512-sample hops and reports 2048 samples of latency. Mode changes notify the VST3 host from the message thread; the host may briefly interrupt playback while rebuilding delay compensation.
+A 5 ms lookahead soft-attack ducker. Influence 0-100 is linear depth; 100-150 is exponential. Duration sets the total key length with the last 20% fading out; 2000 ms means infinity. The key filter is a non-resonant 12 dB/oct HP+LP and full-range endpoints bypass it. M/S balance changes processing depth, not output level.
 
-Influence 0–100 is linear depth; 100–150 is exponential: 100=1x, 125=2.828x, 150=8x. Gain never becomes negative. Spectrum uses 32 overlapping log-energy bands.
-
-The key filter is a non-resonant 12dB/oct HP+LP. Full-range endpoints bypass it. M/S focus changes processing depth, not output level. Mono input has no Side component.
+Processing Range is a subtractive dynamic bell/shelf. The dry path is never permanently filtered; with no reduction the output is latency-aligned dry.
 
 ## Builds
 
-GitHub Actions builds macOS universal arm64+x86_64 and Windows x64 VST3 packages. macOS builds are ad-hoc signed, not notarized; Windows builds are unsigned.
+GitHub Actions builds macOS universal arm64+x86_64 and Windows x64 VST3/AAX packages, runs pluginval at strictness 5, and executes `PocketV10Test`.
 
 This is experimental software. Back up old projects and plug-ins before replacement.

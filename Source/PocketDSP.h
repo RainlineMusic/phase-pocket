@@ -11,16 +11,16 @@ class Engine {
     struct Delayed { std::array<float,2> dry{},key{}; };
     struct Peak { std::uint64_t index=0; float value=0; };
     SidechainFilter filter;
-    CrossoverSplitter processingFilter;
+    DynamicBandFilter processingFilter;
     std::vector<Delayed> delay;
     std::vector<Peak> peaks;
     size_t write=0,head=0,tail=0;
     std::uint64_t clock=0,age=0;
     int lookahead=240,refractory=0,quiet=0;
     double rate=48000;
-    float amount=1,targetAmount=1,ms=0,targetMs=0,targetBypass=0,outputGain=1,targetOutputGain=1;
-    float duration=2000,envelope=0,fast=0,slow=0,eventPeak=0,smoothedControl=0;
-    float fastC=0,slowC=0,releaseC=0,endC=0,slew=0,attackC=0;
+    float amount=1,targetAmount=1,ms=0,targetMs=0,targetBypass=0,bypassMix=0,outputGain=1,targetOutputGain=1;
+    float duration=2000,targetDuration=2000,eventDuration=2000,envelope=0,fast=0,slow=0,eventPeak=0,smoothedControl=0;
+    float fastC=0,slowC=0,releaseC=0,endC=0,slew=0,attackC=0,bypassC=0;
     bool active=false,onsetHighPreviously=false;
     static float clean(float v) noexcept { return std::isfinite(v)?v:0.f; }
 public:
@@ -41,21 +41,23 @@ public:
         write=head=tail=0;clock=age=0;refractory=quiet=0;
         filter.reset(rate);processingFilter.reset(rate);
         amount=targetAmount=std::clamp(influence,0.f,1.5f);
-        ms=targetMs=targetBypass=0;outputGain=targetOutputGain=1;envelope=fast=slow=eventPeak=0;smoothedControl=0;
+        ms=targetMs=targetBypass=bypassMix=0;outputGain=targetOutputGain=1;envelope=fast=slow=eventPeak=0;smoothedControl=0;
         active=onsetHighPreviously=false;
         fastC=float(std::exp(-1/(rate*.0015)));slowC=float(std::exp(-1/(rate*.035)));
         releaseC=float(std::exp(-1/(rate*.04)));endC=float(std::exp(-1/(rate*.002)));
         attackC=float(std::exp(-1/(rate*.0016)));
-        slew=float(std::exp(-1/(rate*.005)));duration=2000;
+        bypassC=float(std::exp(-1/(rate*.0025)));
+        slew=float(std::exp(-1/(rate*.005)));duration=targetDuration=eventDuration=2000;
     }
     void configure(float influence,float durationMs,float low=20,float high=20000,bool bypassed=false,float balance=0,float processLow=20,float processHigh=20000,float outputDb=0) noexcept {
-        targetAmount=std::clamp(clean(influence),0.f,1.5f);duration=std::clamp(clean(durationMs),1.f,2000.f);
-        filter.set(low,high);processingFilter.set(processLow,processHigh);
+        targetAmount=std::clamp(clean(influence),0.f,1.5f);targetDuration=std::clamp(clean(durationMs),1.f,2000.f);
+        filter.set(clean(low),clean(high));processingFilter.set(clean(processLow),clean(processHigh));
         targetMs=std::clamp(clean(balance),-1.f,1.f);targetBypass=bypassed?1.f:0.f;
         const float safeDb=std::clamp(clean(outputDb),-100.f,6.f);targetOutputGain=safeDb<=-99.995f?0.f:std::pow(10.f,safeDb/20.f);
     }
     Sample process(std::array<float,2> input,std::array<float,2> key) noexcept {
-        for(auto& v:input)v=clean(v);for(auto& v:key)v=clean(v);
+        for(auto& v:input)v=clean(v);
+        for(auto& v:key)v=clean(v);
         key=filter.process(key);
         const float level=std::clamp(std::max(std::abs(key[0]),std::abs(key[1])),0.f,1.f);
         fast=level+fastC*(fast-level);slow=level+slowC*(slow-level);
@@ -63,10 +65,10 @@ public:
         const bool onsetHigh=level>1e-7f&&fast>std::max(1e-7f,slow*1.8f);
         const bool onset=onsetHigh&&!onsetHighPreviously&&refractory==0;
         onsetHighPreviously=onsetHigh;
-        if(onset||(!active&&level>std::max(1e-7f,eventPeak*.002f))){active=true;age=0;quiet=0;eventPeak=level;refractory=std::max(1,int(rate*.012));}
+        if(onset||(!active&&level>std::max(1e-7f,eventPeak*.002f))){active=true;age=0;quiet=0;eventPeak=level;eventDuration=targetDuration;duration=eventDuration;refractory=std::max(1,int(rate*.012));}
         if(active){eventPeak=std::max(eventPeak,level);quiet=fast<std::max(1e-7f,eventPeak*.001f)?quiet+1:0;if(quiet>int(rate*.002))active=false;}
         envelope=std::max(level,envelope*(active?releaseC:endC));if(envelope<1e-7f)envelope=0;
-        const float gate=duration>=1999.5f?1.f:(active?durationGain(double(age)*1000/rate,duration):0.f);
+        const float gate=eventDuration>=1999.5f?1.f:(active?durationGain(double(age)*1000/rate,eventDuration):0.f);
         const float control=envelope*gate;if(active)++age;
         while(head!=tail&&clock>std::uint64_t(lookahead)&&peaks[head].index<clock-std::uint64_t(lookahead))head=(head+1)%peaks.size();
         while(head!=tail){size_t last=(tail+peaks.size()-1)%peaks.size();if(peaks[last].value>control)break;tail=last;}
@@ -77,22 +79,42 @@ public:
         delay[write]={input,{key[0]*gate,key[1]*gate}};const size_t read=(write+1)%delay.size();
         Sample result;result.dry=delay[read].dry;result.key=delay[read].key;
         amount=targetAmount+slew*(amount-targetAmount);ms=targetMs+slew*(ms-targetMs);outputGain=targetOutputGain+slew*(outputGain-targetOutputGain);
-        if(std::abs(amount-targetAmount)<1e-4f)amount=targetAmount;if(std::abs(ms-targetMs)<1e-4f)ms=targetMs;if(std::abs(outputGain-targetOutputGain)<1e-6f)outputGain=targetOutputGain;
-        const float reduction=targetBypass>.5f?0.f:std::clamp(effectiveDepth(amount)*smoothedControl,0.f,1.f);
+        if(std::abs(amount-targetAmount)<1e-4f)amount=targetAmount;
+        if(std::abs(ms-targetMs)<1e-4f)ms=targetMs;
+        if(std::abs(outputGain-targetOutputGain)<1e-6f)outputGain=targetOutputGain;
+        const float reduction=std::clamp(effectiveDepth(amount)*smoothedControl,0.f,1.f);
         const float gm=1-reduction*(1-std::max(0.f,ms)),gs=1-reduction*(1+std::min(0.f,ms));
         const float mid=(result.dry[0]+result.dry[1])*.5f,side=(result.dry[0]-result.dry[1])*.5f;
-        std::array<float,2> rest{};
-        const auto band=processingFilter.process({mid,side},rest);
-        const float mix=processingFilter.blend();
-        const float wideMid=gm*mid,wideSide=gs*side;
-        const float splitMid=rest[0]+gm*band[0],splitSide=rest[1]+gs*band[1];
-        const float processedMid=wideMid+(splitMid-wideMid)*mix,processedSide=wideSide+(splitSide-wideSide)*mix;
+        // v0.9: the dry path is never filtered. The band filter only extracts the
+        // selection, which is then subtracted by the amount of ducking:
+        //     out = dry - (1 - g) * selection
+        // With the handles parked the selection weights are zero and mix is zero, so
+        // this collapses back to the plain wideband duck, bit for bit.
+        std::array<float,2> band{};
+        float mix=0.f;
+        if(processingFilter.engaged()){
+            band=processingFilter.process({mid,side});
+            mix=processingFilter.blend();
+        }
+        const float selectMid=mid+(band[0]-mid)*mix,selectSide=side+(band[1]-side)*mix;
+        const float processedMid=mid-(1-gm)*selectMid,processedSide=side-(1-gs)*selectSide;
         result.out={processedMid+processedSide,processedMid-processedSide};
         // The meter follows the gain the engine asked for, so the history stays the
-        // same whether the reduction runs wideband or inside a crossover band.
+        // same whether the reduction runs wideband or inside the selected band.
         result.gain=std::clamp((gm+gs)*.5f,0.f,1.f);
-        if(reduction==0&&mix<=0){result.out=result.dry;result.gain=1;}
-        if(targetBypass>.5f){result.out=result.dry;result.gain=1;}else{result.out[0]*=outputGain;result.out[1]*=outputGain;}
+        if(reduction==0){result.out=result.dry;result.gain=1;}
+        result.out[0]*=outputGain;result.out[1]*=outputGain;
+
+        // Click-free but perceptually immediate bypass. Both sides are already
+        // aligned to the same 5 ms lookahead, so this crossfade adds no latency.
+        const float bypassTarget=targetBypass>.5f?1.f:0.f;
+        bypassMix=bypassTarget+bypassC*(bypassMix-bypassTarget);
+        if(std::abs(bypassMix-bypassTarget)<1e-5f)bypassMix=bypassTarget;
+        if(bypassMix>0.f){
+            result.out[0]+=bypassMix*(result.dry[0]-result.out[0]);
+            result.out[1]+=bypassMix*(result.dry[1]-result.out[1]);
+            result.gain+=bypassMix*(1.f-result.gain);
+        }
         write=read;++clock;return result;
     }
 };
