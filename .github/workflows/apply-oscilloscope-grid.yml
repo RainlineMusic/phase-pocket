@@ -1,0 +1,39 @@
+name: Apply oscilloscope cylinder geometry
+
+on:
+  push:
+    branches: [Release-1.0]
+    paths: [.github/workflows/apply-oscilloscope-grid.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: Release-1.0
+      - name: Match oscilloscope grid to Gain History
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Source/PluginEditor.cpp')
+          s = p.read_text(encoding='utf-8')
+          anchor = s.index('            cg.setColour(grid);')
+          start = s.index('            if(gain){', anchor)
+          else_marker = '            }else{\n                // Keep the oscilloscope grid unchanged.'
+          split = s.index(else_marker, start)
+          gain_geometry = s[s.index('\n', start) + 1:split]
+          end_marker = '\n            }\n            if(gain){text'
+          end = s.index(end_marker, split)
+          s = s[:start] + gain_geometry + s[end + len('\n            }'):]
+          p.write_text(s, encoding='utf-8')
+          PY
+          git config user.name "Rainline Music"
+          git config user.email "74309432+RainlineMusic@users.noreply.github.com"
+          git add Source/PluginEditor.cpp
+          git rm .github/workflows/apply-oscilloscope-grid.yml
+          git commit -m "Match oscilloscope cylinder geometry to gain history"
+          git push origin HEAD:Release-1.0
