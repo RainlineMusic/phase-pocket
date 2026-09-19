@@ -1,17 +1,22 @@
-name: Build macOS and Windows VST3 and AAX
+name: Build Duck Pocket macOS and Windows
+
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/v0.6-dsp-ui]
+    branches: [main, Release-1.0, feature/v0.10-duck-pocket]
   pull_request:
-    branches: [main, feature/v0.6-dsp-ui]
+    branches: [main, Release-1.0]
+
 permissions:
   contents: read
+
 concurrency:
-  group: phase-pocket-build-${{ github.ref }}
+  group: duck-pocket-build-${{ github.ref }}
   cancel-in-progress: true
+
 env:
-  PLUGIN_VERSION: "0.8"
+  PLUGIN_VERSION: "0.10"
+
 jobs:
   macos:
     runs-on: macos-14
@@ -26,18 +31,23 @@ jobs:
       APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Download JUCE 8.0.4
         run: |
           curl -fL https://github.com/juce-framework/JUCE/releases/download/8.0.4/juce-8.0.4-osx.zip -o juce.zip
           unzip -q juce.zip
+
       - name: DSP regression tests
         run: |
-          c++ -std=c++17 -O2 Tests/v08_test.cpp -o v08_test
-          ./v08_test
+          c++ -std=c++17 -O2 Tests/v10_test.cpp -o v10_test
+          ./v10_test
+
       - name: Configure universal build
         run: cmake -S . -B build -G Xcode -DJUCE_DIR="$PWD/JUCE" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
       - name: Build VST3 and AAX
-        run: cmake --build build --config Release --target PhasePocket_VST3 PhasePocket_AAX
+        run: cmake --build build --config Release --target DuckPocket_VST3 DuckPocket_AAX
+
       - name: Import Apple Developer ID certificate
         id: apple-signing
         shell: bash
@@ -47,7 +57,7 @@ jobs:
             echo "No Apple certificate secrets: using ad-hoc signatures."
             exit 0
           fi
-          KEYCHAIN_PATH="$RUNNER_TEMP/phase-pocket.keychain-db"
+          KEYCHAIN_PATH="$RUNNER_TEMP/duck-pocket.keychain-db"
           KEYCHAIN_PASSWORD="${MACOS_KEYCHAIN_PASSWORD:-temporary-password}"
           echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -56,13 +66,13 @@ jobs:
           security import "$RUNNER_TEMP/developer-id.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
           echo "enabled=true" >> "$GITHUB_OUTPUT"
+
       - name: Sign and inspect macOS plug-ins
         shell: bash
         run: |
-          VST3="build/PhasePocket_artefacts/Release/VST3/Phase Pocket.vst3"
-          AAX="build/PhasePocket_artefacts/Release/AAX/Phase Pocket.aaxplugin"
+          VST3="build/DuckPocket_artefacts/Release/VST3/Duck Pocket.vst3"
+          AAX="build/DuckPocket_artefacts/Release/AAX/Duck Pocket.aaxplugin"
           if [[ "${{ steps.apple-signing.outputs.enabled }}" == "true" ]]; then
             codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" "$VST3"
             codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" "$AAX"
@@ -72,44 +82,45 @@ jobs:
           fi
           codesign --verify --deep --strict --verbose=2 "$VST3"
           codesign --verify --deep --strict --verbose=2 "$AAX"
-          lipo "$VST3/Contents/MacOS/Phase Pocket" -verify_arch arm64 x86_64
-          lipo "$AAX/Contents/MacOS/Phase Pocket" -verify_arch arm64 x86_64
+          lipo "$VST3/Contents/MacOS/Duck Pocket" -verify_arch arm64 x86_64
+          lipo "$AAX/Contents/MacOS/Duck Pocket" -verify_arch arm64 x86_64
+
       - name: Notarize and staple macOS plug-ins
         if: steps.apple-signing.outputs.enabled == 'true'
         shell: bash
         run: |
-          if [[ -z "$APPLE_ID" || -z "$APPLE_TEAM_ID" || -z "$APPLE_APP_PASSWORD" ]]; then
-            echo "No notarization secrets: signed but not notarized."
-            exit 0
-          fi
-          VST3="build/PhasePocket_artefacts/Release/VST3/Phase Pocket.vst3"
-          AAX="build/PhasePocket_artefacts/Release/AAX/Phase Pocket.aaxplugin"
+          if [[ -z "$APPLE_ID" || -z "$APPLE_TEAM_ID" || -z "$APPLE_APP_PASSWORD" ]]; then exit 0; fi
+          VST3="build/DuckPocket_artefacts/Release/VST3/Duck Pocket.vst3"
+          AAX="build/DuckPocket_artefacts/Release/AAX/Duck Pocket.aaxplugin"
           ditto -c -k --keepParent "$VST3" "$RUNNER_TEMP/vst3-notary.zip"
           xcrun notarytool submit "$RUNNER_TEMP/vst3-notary.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
           xcrun stapler staple "$VST3"
           ditto -c -k --keepParent "$AAX" "$RUNNER_TEMP/aax-notary.zip"
           xcrun notarytool submit "$RUNNER_TEMP/aax-notary.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
           xcrun stapler staple "$AAX"
+
       - name: Validate macOS VST3
         run: |
           set -o pipefail
           curl -fL https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip -o pluginval.zip
           unzip -q pluginval.zip
           chmod +x pluginval.app/Contents/MacOS/pluginval
-          pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --validate "$PWD/build/PhasePocket_artefacts/Release/VST3/Phase Pocket.vst3" 2>&1 | tee pluginval-macos.log
+          pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --validate "$PWD/build/DuckPocket_artefacts/Release/VST3/Duck Pocket.vst3" 2>&1 | tee pluginval-macos.log
+
       - name: Package macOS plug-ins
         run: |
-          ditto -c -k --sequesterRsrc --keepParent "build/PhasePocket_artefacts/Release/VST3/Phase Pocket.vst3" "PhasePocket-v${PLUGIN_VERSION}-macOS-Universal-VST3.zip"
-          ditto -c -k --sequesterRsrc --keepParent "build/PhasePocket_artefacts/Release/AAX/Phase Pocket.aaxplugin" "PhasePocket-v${PLUGIN_VERSION}-macOS-Universal-AAX-Developer.zip"
+          ditto -c -k --sequesterRsrc --keepParent "build/DuckPocket_artefacts/Release/VST3/Duck Pocket.vst3" "DuckPocket-v${PLUGIN_VERSION}-macOS-Universal-VST3.zip"
+          ditto -c -k --sequesterRsrc --keepParent "build/DuckPocket_artefacts/Release/AAX/Duck Pocket.aaxplugin" "DuckPocket-v${PLUGIN_VERSION}-macOS-Universal-AAX-Developer.zip"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: PhasePocket-v0.8-macOS-Universal-VST3
-          path: PhasePocket-v0.8-macOS-Universal-VST3.zip
+          name: DuckPocket-v0.10-macOS-Universal-VST3
+          path: DuckPocket-v0.10-macOS-Universal-VST3.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: PhasePocket-v0.8-macOS-Universal-AAX-Developer
-          path: PhasePocket-v0.8-macOS-Universal-AAX-Developer.zip
+          name: DuckPocket-v0.10-macOS-Universal-AAX-Developer
+          path: DuckPocket-v0.10-macOS-Universal-AAX-Developer.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
@@ -117,26 +128,32 @@ jobs:
           name: validation-log-macos
           path: pluginval-macos.log
           if-no-files-found: ignore
+
   windows:
     runs-on: windows-2022
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+
       - name: Download JUCE 8.0.4
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/juce-framework/JUCE/archive/refs/tags/8.0.4.zip -OutFile juce.zip
           Expand-Archive juce.zip -DestinationPath juce-unpack
           Move-Item juce-unpack/JUCE-8.0.4 JUCE
+
       - name: Configure x64 build
         run: cmake -S . -B build -A x64 -DJUCE_DIR="${{ github.workspace }}/JUCE"
+
       - name: Build VST3, AAX and DSP tests
-        run: cmake --build build --config Release --target PhasePocket_VST3 PhasePocket_AAX PocketV08Test
+        run: cmake --build build --config Release --target DuckPocket_VST3 DuckPocket_AAX PocketV10Test
+
       - name: Run DSP tests
         shell: pwsh
         run: |
-          & "./build/Release/PocketV08Test.exe"
+          & "./build/Release/PocketV10Test.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Validate Windows VST3
         shell: pwsh
         run: |
@@ -144,22 +161,24 @@ jobs:
           Expand-Archive pluginval.zip -DestinationPath pluginval-unpack
           $validator = (Get-ChildItem pluginval-unpack -Recurse -Filter pluginval.exe | Select-Object -First 1).FullName
           if (-not $validator) { throw "pluginval executable not found" }
-          & $validator --strictness-level 5 --validate "$PWD/build/PhasePocket_artefacts/Release/VST3/Phase Pocket.vst3" 2>&1 | Tee-Object -FilePath pluginval-windows.log
+          & $validator --strictness-level 5 --validate "$PWD/build/DuckPocket_artefacts/Release/VST3/Duck Pocket.vst3" 2>&1 | Tee-Object -FilePath pluginval-windows.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Package Windows plug-ins
         shell: pwsh
         run: |
-          Compress-Archive -Path "build/PhasePocket_artefacts/Release/VST3/Phase Pocket.vst3" -DestinationPath "PhasePocket-v${env:PLUGIN_VERSION}-Windows-x64-VST3.zip"
-          Compress-Archive -Path "build/PhasePocket_artefacts/Release/AAX/Phase Pocket.aaxplugin" -DestinationPath "PhasePocket-v${env:PLUGIN_VERSION}-Windows-x64-AAX-Developer.zip"
+          Compress-Archive -Path "build/DuckPocket_artefacts/Release/VST3/Duck Pocket.vst3" -DestinationPath "DuckPocket-v${env:PLUGIN_VERSION}-Windows-x64-VST3.zip"
+          Compress-Archive -Path "build/DuckPocket_artefacts/Release/AAX/Duck Pocket.aaxplugin" -DestinationPath "DuckPocket-v${env:PLUGIN_VERSION}-Windows-x64-AAX-Developer.zip"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: PhasePocket-v0.8-Windows-x64-VST3
-          path: PhasePocket-v0.8-Windows-x64-VST3.zip
+          name: DuckPocket-v0.10-Windows-x64-VST3
+          path: DuckPocket-v0.10-Windows-x64-VST3.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: PhasePocket-v0.8-Windows-x64-AAX-Developer
-          path: PhasePocket-v0.8-Windows-x64-AAX-Developer.zip
+          name: DuckPocket-v0.10-Windows-x64-AAX-Developer
+          path: DuckPocket-v0.10-Windows-x64-AAX-Developer.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
