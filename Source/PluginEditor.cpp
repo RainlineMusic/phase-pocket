@@ -264,7 +264,6 @@ void DuckPocketAudioProcessorEditor::paintChrome(juce::Graphics& g){
             text(cg,gain?"WAVEFORM ENVELOPE":"OUT     KEY",{box.getRight()-240,box.getY()+12,216,24},11,secondary,juce::Justification::centredRight,textGlow);
             const juce::Rectangle<float> plot(box.getX()+18,box.getY()+47,box.getWidth()-70,box.getHeight()-87);
             cg.setColour(grid);
-            if(gain){
                 const float top=plot.getY(),bottom=plot.getBottom(),midY=plot.getCentreY(),height=plot.getHeight();
                 const float left=plot.getX(),right=plot.getRight(),endS=height*.10f,ringS=height*.04f;
                 auto arc=[&](float cx,float s){juce::Path p;p.startNewSubPath(cx,top);p.quadraticTo(cx+2.f*s,midY,cx,bottom);stroke(cg,p,grid,.85f);};
@@ -277,11 +276,7 @@ void DuckPocketAudioProcessorEditor::paintChrome(juce::Graphics& g){
                 cg.drawLine(left,top,right,top,.85f);cg.drawLine(left,bottom,right,bottom,.85f);
                 // Interior generators terminate exactly on the inner lens parabolas.
                 for(float u:{.25f,.5f,.75f}){const float y=top+u*height,offset=4.f*endS*u*(1.f-u);cg.drawLine(left+offset,y,right-offset,y,.85f);}
-            }else{
-                // Keep the oscilloscope grid unchanged.
-                for(int i=0;i<=4;++i){const float t=float(i)/4.f,y=plot.getY()+t*plot.getHeight();const float spread=std::sin(t*juce::MathConstants<float>::pi)*17.f;juce::Path rail;rail.startNewSubPath(plot.getX()-spread,y);rail.cubicTo(plot.getX()+plot.getWidth()*.32f,y+2.f*(t-.5f),plot.getX()+plot.getWidth()*.68f,y+2.f*(.5f-t),plot.getRight()+spread,y);stroke(cg,rail,grid,.85f);}
-                for(int i=0;i<=4;++i){const float x=plot.getX()+float(i)*plot.getWidth()/4.f;const float bow=float(i-2)*8.5f;juce::Path rail;rail.startNewSubPath(x,plot.getY());rail.cubicTo(x+bow,plot.getY()+plot.getHeight()*.28f,x+bow,plot.getY()+plot.getHeight()*.72f,x,plot.getBottom());stroke(cg,rail,grid,.85f);}
-            }
+
             if(gain){text(cg,"100%",{plot.getRight()+7,plot.getY()-9,43,20},11,label,juce::Justification::centredLeft,textGlow);text(cg,"0%",{plot.getRight()+7,plot.getBottom()-10,43,20},11,label,juce::Justification::centredLeft,textGlow);}
             else{text(cg,"+1",{plot.getRight()+7,plot.getY()-9,40,20},11,secondary,juce::Justification::centredLeft,textGlow);text(cg,"-1",{plot.getRight()+7,plot.getBottom()-10,40,20},11,secondary,juce::Justification::centredLeft,textGlow);}
             const double window=gain?gainWindow:scopeWindow;
