@@ -38,3 +38,11 @@
 - CMake and CI now build/run `PocketV10Test`.
 - Version and artifact names are updated to 0.10.
 - Windows builds define `NOMINMAX`/`WIN32_LEAN_AND_MEAN`; source is compiled as UTF-8.
+
+## v0.10.1 follow-up
+
+- Added a display-only 3-tap reconstruction filter after per-pixel aggregation to suppress one-pixel bucket phase shimmer while traces scroll. DSP data is unchanged.
+- Fixed 1-20 ms double notches: the detector now requires a real 4 ms low-level re-arm gap before a decaying/ringing key tail can start another event.
+- Gain History uses exact parabolic cylinder geometry: end lenses at 10% height, inward quarter rings at 4%, a straight centre ring, full top/bottom generators, and middle generators terminating on the inner lenses.
+- Gain History and Oscilloscope now share one Graph Window setting from 100 ms to 5 s.
+- Added `PocketShortDurationTest` covering 1, 2, 5, 10 and 20 ms decaying key tails.

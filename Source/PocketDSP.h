@@ -16,12 +16,12 @@ class Engine {
     std::vector<Peak> peaks;
     size_t write=0,head=0,tail=0;
     std::uint64_t clock=0,age=0;
-    int lookahead=240,refractory=0,quiet=0;
+    int lookahead=240,refractory=0,quiet=0,rearmQuiet=0;
     double rate=48000;
     float amount=1,targetAmount=1,ms=0,targetMs=0,targetBypass=0,bypassMix=0,outputGain=1,targetOutputGain=1;
     float duration=2000,targetDuration=2000,eventDuration=2000,envelope=0,fast=0,slow=0,eventPeak=0,smoothedControl=0;
     float fastC=0,slowC=0,releaseC=0,endC=0,slew=0,attackC=0,bypassC=0;
-    bool active=false,onsetHighPreviously=false;
+    bool active=false,onsetHighPreviously=false,triggerArmed=true;
     static float clean(float v) noexcept { return std::isfinite(v)?v:0.f; }
 public:
     // 5 ms of lookahead: the gain starts moving before the transient arrives so the
@@ -38,11 +38,11 @@ public:
     void reset(double sr,float influence=1) {
         rate=std::max(1.,sr);lookahead=latencyForRate(rate);
         delay.assign(size_t(lookahead+1),{});peaks.assign(size_t(lookahead+2),{});
-        write=head=tail=0;clock=age=0;refractory=quiet=0;
+        write=head=tail=0;clock=age=0;refractory=quiet=rearmQuiet=0;
         filter.reset(rate);processingFilter.reset(rate);
         amount=targetAmount=std::clamp(influence,0.f,1.5f);
         ms=targetMs=targetBypass=bypassMix=0;outputGain=targetOutputGain=1;envelope=fast=slow=eventPeak=0;smoothedControl=0;
-        active=onsetHighPreviously=false;
+        active=onsetHighPreviously=false;triggerArmed=true;
         fastC=float(std::exp(-1/(rate*.0015)));slowC=float(std::exp(-1/(rate*.035)));
         releaseC=float(std::exp(-1/(rate*.04)));endC=float(std::exp(-1/(rate*.002)));
         attackC=float(std::exp(-1/(rate*.0016)));
@@ -65,8 +65,21 @@ public:
         const bool onsetHigh=level>1e-7f&&fast>std::max(1e-7f,slow*1.8f);
         const bool onset=onsetHigh&&!onsetHighPreviously&&refractory==0;
         onsetHighPreviously=onsetHigh;
-        if(onset||(!active&&level>std::max(1e-7f,eventPeak*.002f))){active=true;age=0;quiet=0;eventPeak=level;eventDuration=targetDuration;duration=eventDuration;refractory=std::max(1,int(rate*.012));}
-        if(active){eventPeak=std::max(eventPeak,level);quiet=fast<std::max(1e-7f,eventPeak*.001f)?quiet+1:0;if(quiet>int(rate*.002))active=false;}
+        if(active){
+            eventPeak=std::max(eventPeak,level);
+            quiet=fast<std::max(1e-7f,eventPeak*.001f)?quiet+1:0;
+            if(quiet>int(rate*.002)){active=false;rearmQuiet=0;}
+        }
+        // A short key tail used to start a second event as soon as `active`
+        // dropped, producing two 1-20 ms notches. Require a real low-level gap
+        // before arming the next event; a rising onset then starts it normally.
+        if(!active&&!triggerArmed){
+            const float resetLevel=std::max(1e-7f,eventPeak*.001f);
+            rearmQuiet=level<resetLevel?rearmQuiet+1:0;
+            if(rearmQuiet>int(rate*.004)){triggerArmed=true;eventPeak=0;rearmQuiet=0;onsetHighPreviously=false;}
+        }
+        const bool trigger=triggerArmed&&refractory==0&&(onset||(!active&&level>1e-5f));
+        if(trigger){active=true;triggerArmed=false;age=0;quiet=0;rearmQuiet=0;eventPeak=level;eventDuration=targetDuration;duration=eventDuration;refractory=std::max(1,int(rate*.012));}
         envelope=std::max(level,envelope*(active?releaseC:endC));if(envelope<1e-7f)envelope=0;
         const float gate=eventDuration>=1999.5f?1.f:(active?durationGain(double(age)*1000/rate,eventDuration):0.f);
         const float control=envelope*gate;if(active)++age;

@@ -83,7 +83,7 @@ private:
     juce::Rectangle<int> blurArea,gainArea,scopeArea;
 
     // Reused every frame: no heap churn in the 60 fps paint path.
-    std::vector<float> bucketLo,bucketHi;
+    std::vector<float> bucketLo,bucketHi,bucketScratch;
     std::vector<juce::Point<float>> pathPoints,pathTop,pathBottom;
 
     void frameTick();

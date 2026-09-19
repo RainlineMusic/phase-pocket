@@ -99,7 +99,7 @@ DuckPocketAudioProcessorEditor::DuckPocketAudioProcessorEditor(DuckPocketAudioPr
     juce::PropertiesFile::Options o;o.applicationName="DuckPocket";o.filenameSuffix="settings";o.folderName="RainlineMusic";o.osxLibrarySubFolder="Application Support";preferences=std::make_unique<juce::PropertiesFile>(o);
     // Solid Dark is the default theme; a stored preference still wins.
     auto saved=preferences->getValue("duckPocket.ui.theme",preferences->getValue("phasePocket.ui.theme","solidDark"));setTheme(saved=="neon"?PocketTheme::Neon:(saved=="amber"?PocketTheme::Amber:(saved=="solidWhite"?PocketTheme::SolidWhite:PocketTheme::SolidDark)),false);
-    gainWindow=preferences->getDoubleValue("duckPocket.ui.gainWindow",preferences->getDoubleValue("phasePocket.ui.gainWindow",1.));scopeWindow=preferences->getDoubleValue("duckPocket.ui.scopeWindow",preferences->getDoubleValue("phasePocket.ui.scopeWindow",1.));
+    gainWindow=preferences->getDoubleValue("duckPocket.ui.graphWindow",preferences->getDoubleValue("duckPocket.ui.gainWindow",preferences->getDoubleValue("phasePocket.ui.gainWindow",1.)));scopeWindow=gainWindow;
     setLookAndFeel(&look);setOpaque(true);setResizable(true,true);
     for(auto* c:std::initializer_list<juce::Component*>{&influence,&duration,&outputGain,&sidechainRange,&processingRange,&midSide,&settingsButton,&bypassButton,&panelButton,&freezeButton})addAndMakeVisible(c);
     influenceAttach=std::make_unique<SliderAttachment>(p.parameters,"amount",influence);durationAttach=std::make_unique<SliderAttachment>(p.parameters,"duration",duration);outputAttach=std::make_unique<SliderAttachment>(p.parameters,"outputGain",outputGain);outputGain.setDoubleClickReturnValue(true,0);midSide.setSliderStyle(juce::Slider::LinearHorizontal);midSide.setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);midSide.setDoubleClickReturnValue(true,0);msAttach=std::make_unique<SliderAttachment>(p.parameters,"msBalance",midSide);midSide.onValueChange=[this]{repaint(scaled(90,808,780,52));};
@@ -120,7 +120,7 @@ DuckPocketAudioProcessorEditor::DuckPocketAudioProcessorEditor(DuckPocketAudioPr
     setResizeLimits(800,530,1500,1400);getConstrainer()->setFixedAspectRatio(960./designHeight);setSize(width,juce::roundToInt(width*designHeight/960.));
     panelButton.setToggleState(expanded,juce::dontSendNotification);
     for(auto* c:{static_cast<juce::Component*>(&sidechainRange),static_cast<juce::Component*>(&processingRange),static_cast<juce::Component*>(&midSide)})c->setVisible(expanded);
-    pathPoints.reserve(4096);pathTop.reserve(4096);pathBottom.reserve(4096);bucketLo.reserve(4096);bucketHi.reserve(4096);
+    pathPoints.reserve(4096);pathTop.reserve(4096);pathBottom.reserve(4096);bucketLo.reserve(4096);bucketHi.reserve(4096);bucketScratch.reserve(4096);
     ready=true;p.editorWidth.store(width);p.editorExpanded.store(expanded);PocketTrace discard;while(p.popTrace(discard)){}p.editorOpen.store(true);frameTick();
     // VBlank-driven rendering, capped to 60 fps. This avoids timer jitter and
     // never queues frames faster than the monitor can present them.
@@ -136,7 +136,7 @@ DuckPocketAudioProcessorEditor::~DuckPocketAudioProcessorEditor(){vblank.reset()
 void DuckPocketAudioProcessorEditor::saveSize(){if(!ready||!preferences)return;audioProcessor.editorWidth.store(getWidth());audioProcessor.editorExpanded.store(expanded);preferences->setValue("duckPocket.ui.width",getWidth());preferences->setValue("duckPocket.ui.expanded",expanded);preferences->saveIfNeeded();resizeStamp=0;}
 void DuckPocketAudioProcessorEditor::invalidateChrome(){chromeValid=false;repaint();}
 void DuckPocketAudioProcessorEditor::setTheme(PocketTheme t,bool persist){look.theme=t;if(persist&&preferences){preferences->setValue("duckPocket.ui.theme",t==PocketTheme::Neon?"neon":(t==PocketTheme::Amber?"amber":(t==PocketTheme::SolidDark?"solidDark":"solidWhite")));preferences->saveIfNeeded();}chromeValid=false;repaint();for(auto* c:getChildren())c->repaint();if(bypassMix>0)juce::MessageManager::callAsync([safe=juce::Component::SafePointer<DuckPocketAudioProcessorEditor>(this)]{if(safe)safe->captureBlurSnapshot();});}
-void DuckPocketAudioProcessorEditor::setHistoryWindow(bool gain,double seconds){if(gain)gainWindow=seconds;else scopeWindow=seconds;preferences->setValue(gain?"duckPocket.ui.gainWindow":"duckPocket.ui.scopeWindow",seconds);preferences->saveIfNeeded();invalidateChrome();}
+void DuckPocketAudioProcessorEditor::setHistoryWindow(bool,double seconds){gainWindow=scopeWindow=seconds;preferences->setValue("duckPocket.ui.graphWindow",seconds);preferences->setValue("duckPocket.ui.gainWindow",seconds);preferences->setValue("duckPocket.ui.scopeWindow",seconds);preferences->saveIfNeeded();invalidateChrome();}
 // A single snowflake button freezes and resumes both graphs together.
 void DuckPocketAudioProcessorEditor::setFrozen(bool frozen){
     gainFrozen=scopeFrozen=frozen;frozenGain.clear();frozenScope.clear();
@@ -151,7 +151,7 @@ void DuckPocketAudioProcessorEditor::setFrozen(bool frozen){
     freezeButton.setToggleState(frozen,juce::dontSendNotification);freezeButton.repaint();
     repaint(gainArea);repaint(scopeArea);
 }
-void DuckPocketAudioProcessorEditor::showSettingsMenu(){juce::PopupMenu root,gain,scope,theme;for(size_t i=0;i<windows.size();++i){gain.addItem(int(i)+1,timeLabel(windows[i]),true,std::abs(gainWindow-windows[i])<1e-6);scope.addItem(int(i)+101,timeLabel(windows[i]),true,std::abs(scopeWindow-windows[i])<1e-6);}theme.addItem(201,"Neon",true,look.theme==PocketTheme::Neon);theme.addItem(204,"Amber",true,look.theme==PocketTheme::Amber);theme.addItem(202,"Solid Dark",true,look.theme==PocketTheme::SolidDark);theme.addItem(203,"Solid White",true,look.theme==PocketTheme::SolidWhite);root.addSubMenu("Gain history window",gain);root.addSubMenu("Oscilloscope window",scope);root.addSeparator();root.addSubMenu("Theme",theme);auto safe=juce::Component::SafePointer<DuckPocketAudioProcessorEditor>(this);root.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(settingsButton),[safe](int id){if(!safe||id==0)return;if(id>=1&&id<=6)safe->setHistoryWindow(true,windows[size_t(id-1)]);else if(id>=101&&id<=106)safe->setHistoryWindow(false,windows[size_t(id-101)]);else if(id==201)safe->setTheme(PocketTheme::Neon);else if(id==204)safe->setTheme(PocketTheme::Amber);else if(id==202)safe->setTheme(PocketTheme::SolidDark);else if(id==203)safe->setTheme(PocketTheme::SolidWhite);});}
+void DuckPocketAudioProcessorEditor::showSettingsMenu(){juce::PopupMenu root,window,theme;for(size_t i=0;i<windows.size();++i)window.addItem(int(i)+1,timeLabel(windows[i]),true,std::abs(gainWindow-windows[i])<1e-6);theme.addItem(201,"Neon",true,look.theme==PocketTheme::Neon);theme.addItem(204,"Amber",true,look.theme==PocketTheme::Amber);theme.addItem(202,"Solid Dark",true,look.theme==PocketTheme::SolidDark);theme.addItem(203,"Solid White",true,look.theme==PocketTheme::SolidWhite);root.addSubMenu("Graph window",window);root.addSeparator();root.addSubMenu("Theme",theme);auto safe=juce::Component::SafePointer<DuckPocketAudioProcessorEditor>(this);root.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(settingsButton),[safe](int id){if(!safe||id==0)return;if(id>=1&&id<=6)safe->setHistoryWindow(true,windows[size_t(id-1)]);else if(id==201)safe->setTheme(PocketTheme::Neon);else if(id==204)safe->setTheme(PocketTheme::Amber);else if(id==202)safe->setTheme(PocketTheme::SolidDark);else if(id==203)safe->setTheme(PocketTheme::SolidWhite);});}
 void DuckPocketAudioProcessorEditor::setPanelExpanded(bool open){expanded=open;audioProcessor.editorExpanded.store(open);if(preferences){preferences->setValue("duckPocket.ui.expanded",open);preferences->saveIfNeeded();}panelButton.setToggleState(open,juce::dontSendNotification);panelButton.setTooltip(open?"Hide advanced controls":"Show sidechain, processing range and M/S balance");for(auto* c:{static_cast<juce::Component*>(&sidechainRange),static_cast<juce::Component*>(&processingRange),static_cast<juce::Component*>(&midSide)})c->setVisible(open);double height=open?890.:636.;getConstrainer()->setFixedAspectRatio(960./height);setSize(getWidth(),juce::roundToInt(getWidth()*height/960.));resized();invalidateChrome();}
 void DuckPocketAudioProcessorEditor::syncRange(){if(rangeGesture)return;float a=audioProcessor.parameters.getRawParameterValue("scLow")->load(),b=audioProcessor.parameters.getRawParameterValue("scHigh")->load();sidechainRange.setMinAndMaxValues(juce::jmin(a,b),juce::jmax(a,b),juce::dontSendNotification);repaint(scaled(24,640,912,82));}
 void DuckPocketAudioProcessorEditor::syncProcessingRange(){if(processRangeGesture)return;float a=audioProcessor.parameters.getRawParameterValue("processLow")->load(),b=audioProcessor.parameters.getRawParameterValue("processHigh")->load();processingRange.setMinAndMaxValues(juce::jmin(a,b),juce::jmax(a,b),juce::dontSendNotification);repaint(scaled(24,720,912,82));}
@@ -200,7 +200,13 @@ void DuckPocketAudioProcessorEditor::graph(juce::Graphics& g,juce::Rectangle<flo
     if(gain){
         bucketLo.assign(size_t(columns),2.f);
         for(int i=count-1;i>=0;--i){const auto& v=at(i);const double age=now-v.time;if(age>window)break;if(!frozen&&v.time<resume)continue;if(age<0||!std::isfinite(v.gain))continue;const size_t c=size_t(column(age));bucketLo[c]=juce::jmin(bucketLo[c],juce::jlimit(0.f,1.f,v.gain));}
-        interpolate(false);pathPoints.clear();
+        interpolate(false);
+        // Display-only 3-tap reconstruction filter. It removes the one-pixel
+        // bucket phase changes that shimmer while the trace scrolls; audio and
+        // stored extrema are untouched.
+        bucketScratch=bucketLo;
+        for(int c=1;c+1<columns;++c)if(bucketLo[size_t(c-1)]<=1.f&&bucketLo[size_t(c)]<=1.f&&bucketLo[size_t(c+1)]<=1.f)bucketScratch[size_t(c)]=.25f*bucketLo[size_t(c-1)]+.5f*bucketLo[size_t(c)]+.25f*bucketLo[size_t(c+1)];
+        bucketLo.swap(bucketScratch);pathPoints.clear();
         for(int c=0;c<columns;++c)if(bucketLo[size_t(c)]<=1.f)pathPoints.push_back({plot.getX()+float(c)*span,plot.getBottom()-bucketLo[size_t(c)]*plot.getHeight()});
         if(pathPoints.size()>1)glowStroke(g,smoothPath(pathPoints),label,1.65f,glow);
         return;
@@ -211,7 +217,12 @@ void DuckPocketAudioProcessorEditor::graph(juce::Graphics& g,juce::Rectangle<flo
         bool any=false;
         for(int i=count-1;i>=0;--i){const auto& v=at(i);const double age=now-v.time;if(age>window)break;if(!frozen&&v.time<resume)continue;if(age<0)continue;const float lo=kind?v.keyLo:v.outLo,hi=kind?v.keyHi:v.outHi;if(!std::isfinite(lo)||!std::isfinite(hi))continue;const size_t c=size_t(column(age));bucketLo[c]=juce::jmin(bucketLo[c],juce::jlimit(-1.f,1.f,lo));bucketHi[c]=juce::jmax(bucketHi[c],juce::jlimit(-1.f,1.f,hi));any=true;}
         if(!any)continue;
-        interpolate(true);pathTop.clear();pathBottom.clear();
+        interpolate(true);
+        bucketScratch=bucketLo;
+        for(int c=1;c+1<columns;++c)if(bucketHi[size_t(c-1)]>=bucketLo[size_t(c-1)]&&bucketHi[size_t(c)]>=bucketLo[size_t(c)]&&bucketHi[size_t(c+1)]>=bucketLo[size_t(c+1)])bucketScratch[size_t(c)]=.25f*bucketLo[size_t(c-1)]+.5f*bucketLo[size_t(c)]+.25f*bucketLo[size_t(c+1)];
+        bucketLo.swap(bucketScratch);bucketScratch=bucketHi;
+        for(int c=1;c+1<columns;++c)if(bucketHi[size_t(c-1)]>=bucketLo[size_t(c-1)]&&bucketHi[size_t(c)]>=bucketLo[size_t(c)]&&bucketHi[size_t(c+1)]>=bucketLo[size_t(c+1)])bucketScratch[size_t(c)]=.25f*bucketHi[size_t(c-1)]+.5f*bucketHi[size_t(c)]+.25f*bucketHi[size_t(c+1)];
+        bucketHi.swap(bucketScratch);pathTop.clear();pathBottom.clear();
         for(int c=0;c<columns;++c){if(bucketHi[size_t(c)]<bucketLo[size_t(c)])continue;const float x=plot.getX()+float(c)*span;float a=plot.getCentreY()-bucketHi[size_t(c)]*plot.getHeight()*.5f,b=plot.getCentreY()-bucketLo[size_t(c)]*plot.getHeight()*.5f;if(b-a<1.1f){const float m=(a+b)*.5f;a=m-.55f;b=m+.55f;}pathTop.push_back({x,a});pathBottom.push_back({x,b});}
         if(pathTop.size()<2)continue;
         juce::Path body;
@@ -252,18 +263,24 @@ void DuckPocketAudioProcessorEditor::paintChrome(juce::Graphics& g){
             text(cg,gain?"GAIN HISTORY":"OSCILLOSCOPE",{box.getX()+18,box.getY()+12,220,24},13,label,juce::Justification::centredLeft,textGlow);
             text(cg,gain?"WAVEFORM ENVELOPE":"OUT     KEY",{box.getRight()-240,box.getY()+12,216,24},11,secondary,juce::Justification::centredRight,textGlow);
             const juce::Rectangle<float> plot(box.getX()+18,box.getY()+47,box.getWidth()-70,box.getHeight()-87);
-            // Perspective tunnel: side/vertical rails bow away from the centre,
-            // while horizontal rails widen toward the viewer at mid-depth.
             cg.setColour(grid);
-            for(int i=0;i<=4;++i){
-                const float t=float(i)/4.f,y=plot.getY()+t*plot.getHeight();
-                const float spread=std::sin(t*juce::MathConstants<float>::pi)*17.f;
-                juce::Path rail;rail.startNewSubPath(plot.getX()-spread,y);rail.cubicTo(plot.getX()+plot.getWidth()*.32f,y+2.f*(t-.5f),plot.getX()+plot.getWidth()*.68f,y+2.f*(.5f-t),plot.getRight()+spread,y);stroke(cg,rail,grid,.85f);
-            }
-            for(int i=0;i<=4;++i){
-                const float x=plot.getX()+float(i)*plot.getWidth()/4.f;
-                const float bow=float(i-2)*8.5f;
-                juce::Path rail;rail.startNewSubPath(x,plot.getY());rail.cubicTo(x+bow,plot.getY()+plot.getHeight()*.28f,x+bow,plot.getY()+plot.getHeight()*.72f,x,plot.getBottom());stroke(cg,rail,grid,.85f);
+            if(gain){
+                const float top=plot.getY(),bottom=plot.getBottom(),midY=plot.getCentreY(),height=plot.getHeight();
+                const float left=plot.getX(),right=plot.getRight(),endS=height*.10f,ringS=height*.04f;
+                auto arc=[&](float cx,float s){juce::Path p;p.startNewSubPath(cx,top);p.quadraticTo(cx+2.f*s,midY,cx,bottom);stroke(cg,p,grid,.85f);};
+                // End lenses: outer and inner parabolas meet at both corners.
+                arc(left,-endS);arc(left,endS);arc(right,endS);arc(right,-endS);
+                // Quarter rings bend towards the graph centre; the middle stays straight.
+                arc(left+plot.getWidth()*.25f,ringS);arc(left+plot.getWidth()*.75f,-ringS);
+                cg.drawLine(plot.getCentreX(),top,plot.getCentreX(),bottom,.85f);
+                // Full top/bottom generators.
+                cg.drawLine(left,top,right,top,.85f);cg.drawLine(left,bottom,right,bottom,.85f);
+                // Interior generators terminate exactly on the inner lens parabolas.
+                for(float u:{.25f,.5f,.75f}){const float y=top+u*height,offset=4.f*endS*u*(1.f-u);cg.drawLine(left+offset,y,right-offset,y,.85f);}
+            }else{
+                // Keep the oscilloscope grid unchanged.
+                for(int i=0;i<=4;++i){const float t=float(i)/4.f,y=plot.getY()+t*plot.getHeight();const float spread=std::sin(t*juce::MathConstants<float>::pi)*17.f;juce::Path rail;rail.startNewSubPath(plot.getX()-spread,y);rail.cubicTo(plot.getX()+plot.getWidth()*.32f,y+2.f*(t-.5f),plot.getX()+plot.getWidth()*.68f,y+2.f*(.5f-t),plot.getRight()+spread,y);stroke(cg,rail,grid,.85f);}
+                for(int i=0;i<=4;++i){const float x=plot.getX()+float(i)*plot.getWidth()/4.f;const float bow=float(i-2)*8.5f;juce::Path rail;rail.startNewSubPath(x,plot.getY());rail.cubicTo(x+bow,plot.getY()+plot.getHeight()*.28f,x+bow,plot.getY()+plot.getHeight()*.72f,x,plot.getBottom());stroke(cg,rail,grid,.85f);}
             }
             if(gain){text(cg,"100%",{plot.getRight()+7,plot.getY()-9,43,20},11,label,juce::Justification::centredLeft,textGlow);text(cg,"0%",{plot.getRight()+7,plot.getBottom()-10,43,20},11,label,juce::Justification::centredLeft,textGlow);}
             else{text(cg,"+1",{plot.getRight()+7,plot.getY()-9,40,20},11,secondary,juce::Justification::centredLeft,textGlow);text(cg,"-1",{plot.getRight()+7,plot.getBottom()-10,40,20},11,secondary,juce::Justification::centredLeft,textGlow);}
