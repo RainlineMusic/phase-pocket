@@ -223,7 +223,7 @@ void DuckPocketAudioProcessorEditor::graph(juce::Graphics& g,juce::Rectangle<flo
         bucketLo.swap(bucketScratch);bucketScratch=bucketHi;
         for(int c=1;c+1<columns;++c)if(bucketHi[size_t(c-1)]>=bucketLo[size_t(c-1)]&&bucketHi[size_t(c)]>=bucketLo[size_t(c)]&&bucketHi[size_t(c+1)]>=bucketLo[size_t(c+1)])bucketScratch[size_t(c)]=.25f*bucketHi[size_t(c-1)]+.5f*bucketHi[size_t(c)]+.25f*bucketHi[size_t(c+1)];
         bucketHi.swap(bucketScratch);pathTop.clear();pathBottom.clear();
-        for(int c=0;c<columns;++c){if(bucketHi[size_t(c)]<bucketLo[size_t(c)])continue;const float x=plot.getX()+float(c)*span;float a=plot.getCentreY()-bucketHi[size_t(c)]*plot.getHeight()*.5f,b=plot.getCentreY()-bucketLo[size_t(c)]*plot.getHeight()*.5f;if(b-a<1.1f){const float m=(a+b)*.5f;a=m-.55f;b=m+.55f;}pathTop.push_back({x,a});pathBottom.push_back({x,b});}
+        for(int c=0;c<columns;++c){if(bucketHi[size_t(c)]<bucketLo[size_t(c)])continue;const float lo=bucketLo[size_t(c)],hi=bucketHi[size_t(c)];if(juce::jmax(std::abs(lo),std::abs(hi))<=1e-5f)continue;const float x=plot.getX()+float(c)*span;const float a=plot.getCentreY()-hi*plot.getHeight()*.5f,b=plot.getCentreY()-lo*plot.getHeight()*.5f;pathTop.push_back({x,a});pathBottom.push_back({x,b});}
         if(pathTop.size()<2)continue;
         juce::Path body;
         body.startNewSubPath(pathTop.front());
