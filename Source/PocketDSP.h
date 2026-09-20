@@ -53,7 +53,7 @@ public:
         targetAmount=std::clamp(clean(influence),0.f,1.5f);targetDuration=std::clamp(clean(durationMs),1.f,2000.f);
         filter.set(clean(low),clean(high));processingFilter.set(clean(processLow),clean(processHigh));
         targetMs=std::clamp(clean(balance),-1.f,1.f);targetBypass=bypassed?1.f:0.f;
-        const float safeDb=std::clamp(clean(outputDb),-100.f,6.f);targetOutputGain=safeDb<=-99.995f?0.f:std::pow(10.f,safeDb/20.f);
+        const float safeDb=std::clamp(clean(outputDb),-12.f,6.f);targetOutputGain=std::pow(10.f,safeDb/20.f);
     }
     Sample process(std::array<float,2> input,std::array<float,2> key) noexcept {
         for(auto& v:input)v=clean(v);

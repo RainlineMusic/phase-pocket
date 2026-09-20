@@ -27,8 +27,18 @@ class ResettableRangeSlider final:public juce::Slider {
 public:
     std::function<void()> onReset;
     void mouseDoubleClick(const juce::MouseEvent&) override {if(onReset)onReset();}
+    // Alt-click resets too (JUCE's built-in alt-click only handles a single value).
+    void mouseDown(const juce::MouseEvent& e) override {
+        altReset=!e.mods.isPopupMenu()&&e.mods.withoutMouseButtons()==juce::ModifierKeys(juce::ModifierKeys::altModifier);
+        if(altReset){if(onReset)onReset();return;}
+        juce::Slider::mouseDown(e);
+    }
+    void mouseDrag(const juce::MouseEvent& e) override {if(!altReset)juce::Slider::mouseDrag(e);}
+    void mouseUp(const juce::MouseEvent& e) override {if(altReset){altReset=false;return;}juce::Slider::mouseUp(e);}
     double valueToProportionOfLength(double value) override {return std::log(juce::jlimit(20.,20000.,value)/20.)/std::log(1000.);}
     double proportionOfLengthToValue(double proportion) override {return 20.*std::pow(1000.,juce::jlimit(0.,1.,proportion));}
+private:
+    bool altReset=false;
 };
 
 class ModernDial final:public juce::Slider {
@@ -57,7 +67,7 @@ private:
     PocketLook look;
     ModernDial influence{look,"Influence","Depth","%",0xff5987ff};
     ModernDial duration{look,"Duration","Sidechain length","ms",0xff32d4cb,true};
-    ModernDial outputGain{look,"Output","dB","dB",0xfff1e84b,true,true,true};
+    ModernDial outputGain{look,"Output","dB","dB",0xfff1e84b,false,false,true};
     ResettableRangeSlider sidechainRange,processingRange;
     juce::Slider midSide;
     juce::TextButton settingsButton{"settings"},bypassButton{"power"},panelButton{"panel"},freezeButton{"freeze"};
@@ -74,7 +84,8 @@ private:
     bool gainFrozen=false,scopeFrozen=false;
     double gainResume=0,scopeResume=0;
     bool expanded=false,ready=false,rangeGesture=false,processRangeGesture=false,capturingBlur=false,bypassTarget=false;
-    double resizeStamp=0,nextFrameMs=0;
+    double resizeStamp=0,nextFrameMs=0; // nextFrameMs = time of the last rendered frame
+    double displayTime=0,lastClock=0,lastLatest=0,gapMax=0,lastPaintedTime=-1;
     float bypassMix=0;
     double gainWindow=1.,scopeWindow=1.;
     juce::Image blurredSnapshot,chrome;

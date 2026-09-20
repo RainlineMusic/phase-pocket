@@ -46,7 +46,7 @@ int main(){
             check(maxJump<.02f,"bypass crossfade has no click-sized step");
             check(std::abs(v.out[0]-.3f)<2e-5f&&std::abs(v.out[1]+.5f)<2e-5f,"bypass settles to delayed dry");
         }
-        {auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(0,2000,20,20000,false,0,20,20000,6);pocket::Sample v;for(int n=0;n<int(sr*.2);++n)v=e->process({.25f,.25f},{0,0});check(std::abs(v.out[0]-.25f*std::pow(10.f,6.f/20.f))<1e-4f,"output gain reaches +6 dB");e->configure(0,2000,20,20000,false,0,20,20000,-100);for(int n=0;n<int(sr*.2);++n)v=e->process({.25f,.25f},{0,0});check(std::abs(v.out[0])<1e-6f,"output gain minus infinity mutes");}
+        {auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(0,2000,20,20000,false,0,20,20000,6);pocket::Sample v;for(int n=0;n<int(sr*.2);++n)v=e->process({.25f,.25f},{0,0});check(std::abs(v.out[0]-.25f*std::pow(10.f,6.f/20.f))<1e-4f,"output gain reaches +6 dB");e->configure(0,2000,20,20000,false,0,20,20000,-100);for(int n=0;n<int(sr*.2);++n)v=e->process({.25f,.25f},{0,0});check(std::abs(v.out[0]-.25f*std::pow(10.f,-12.f/20.f))<1e-4f,"output gain is limited to -12 dB");}
         {   // an engaged crossover must stay magnitude flat when nothing is being ducked
             auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(0,2000,20,20000,false,0,300,3000);
             std::mt19937 rng(5);std::uniform_real_distribution<float> n2(-.5f,.5f);std::vector<float> source(size_t(sr*.5));for(auto& s:source)s=n2(rng);
