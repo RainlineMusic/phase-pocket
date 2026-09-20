@@ -1,9 +1,10 @@
-name: Remove oscilloscope centre trace
+name: Apply silent oscilloscope fix
 
 on:
   push:
     branches: [Release-1.0]
-    paths: [.github/workflows/remove-scope-centre-line.yml]
+    paths:
+      - .github/workflows/remove-scope-centre-line.yml
 
 permissions:
   contents: write
@@ -15,42 +16,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: Release-1.0
-      - name: Remove silent centre trace
+      - name: Patch silent trace rendering
+        shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p=Path('Source/PluginEditor.cpp')
           s=p.read_text(encoding='utf-8')
-          start=s.index('        bucketHi.swap(bucketScratch);pathTop.clear();pathBottom.clear();')
-          end=s.index('\n    }\n}\nvoid DuckPocketAudioProcessorEditor::paintChrome',start)
-          replacement='''        bucketHi.swap(bucketScratch);pathTop.clear();pathBottom.clear();
-        const auto colour=kind?(look.isAmber()?look.accent2():look.pick(0xff3794d4,0xff8e8e8e,0xff59616b)):label;
-        auto drawSegment=[&]{
-            if(pathTop.size()<2){pathTop.clear();pathBottom.clear();return;}
-            juce::Path body;
-            body.startNewSubPath(pathTop.front());
-            for(size_t i=1;i+1<pathTop.size();++i)body.quadraticTo(pathTop[i],(pathTop[i]+pathTop[i+1])*.5f);
-            body.lineTo(pathTop.back());body.lineTo(pathBottom.back());
-            for(size_t i=pathBottom.size()-1;i>1;--i)body.quadraticTo(pathBottom[i-1],(pathBottom[i-1]+pathBottom[i-2])*.5f);
-            body.lineTo(pathBottom.front());body.closeSubPath();
-            if(glow){g.setColour(colour.withAlpha(.12f));g.strokePath(body,juce::PathStrokeType(3.5f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));}
-            g.setColour(colour.withAlpha(kind?.28f:.36f));g.fillPath(body);
-            g.setColour(colour.withAlpha(kind?.86f:.96f));g.strokePath(body,juce::PathStrokeType(1.25f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));
-            pathTop.clear();pathBottom.clear();
-        };
-        for(int c=0;c<columns;++c){
-            if(bucketHi[size_t(c)]<bucketLo[size_t(c)]){drawSegment();continue;}
-            const float lo=bucketLo[size_t(c)],hi=bucketHi[size_t(c)];
-            // Silence is a gap, not a minimum-width line. Splitting active runs
-            // also prevents the outline from bridging quiet sections at y=0.
-            if(juce::jmax(std::abs(lo),std::abs(hi))<=1e-5f){drawSegment();continue;}
-            const float x=plot.getX()+float(c)*span;
-            pathTop.push_back({x,plot.getCentreY()-hi*plot.getHeight()*.5f});
-            pathBottom.push_back({x,plot.getCentreY()-lo*plot.getHeight()*.5f});
-        }
-        drawSegment();'''
-          s=s[:start]+replacement+s[end:]
-          p.write_text(s,encoding='utf-8')
+          old='''        for(int c=0;c<columns;++c){if(bucketHi[size_t(c)]<bucketLo[size_t(c)])continue;const float x=plot.getX()+float(c)*span;float a=plot.getCentreY()-bucketHi[size_t(c)]*plot.getHeight()*.5f,b=plot.getCentreY()-bucketLo[size_t(c)]*plot.getHeight()*.5f;if(b-a<1.1f){const float m=(a+b)*.5f;a=m-.55f;b=m+.55f;}pathTop.push_back({x,a});pathBottom.push_back({x,b});}'''
+          new='''        for(int c=0;c<columns;++c){if(bucketHi[size_t(c)]<bucketLo[size_t(c)])continue;const float lo=bucketLo[size_t(c)],hi=bucketHi[size_t(c)];if(juce::jmax(std::abs(lo),std::abs(hi))<=1e-5f)continue;const float x=plot.getX()+float(c)*span;const float a=plot.getCentreY()-hi*plot.getHeight()*.5f,b=plot.getCentreY()-lo*plot.getHeight()*.5f;pathTop.push_back({x,a});pathBottom.push_back({x,b});}'''
+          if old not in s: raise SystemExit('target render loop not found')
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
           PY
           git config user.name "Rainline Music"
           git config user.email "74309432+RainlineMusic@users.noreply.github.com"
