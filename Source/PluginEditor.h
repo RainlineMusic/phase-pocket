@@ -25,12 +25,14 @@ public:
 
 class ResettableRangeSlider final:public juce::Slider {
 public:
-    std::function<void()> onReset;
-    void mouseDoubleClick(const juce::MouseEvent&) override {if(onReset)onReset();}
+    // Separate per-handle callbacks: double-click (or alt-click) only resets
+    // whichever thumb is nearer the click, not both ends of the range at once.
+    std::function<void()> onResetMin,onResetMax;
+    void mouseDoubleClick(const juce::MouseEvent& e) override {resetNearestThumb(e);}
     // Alt-click resets too (JUCE's built-in alt-click only handles a single value).
     void mouseDown(const juce::MouseEvent& e) override {
         altReset=!e.mods.isPopupMenu()&&e.mods.withoutMouseButtons()==juce::ModifierKeys(juce::ModifierKeys::altModifier);
-        if(altReset){if(onReset)onReset();return;}
+        if(altReset){resetNearestThumb(e);return;}
         juce::Slider::mouseDown(e);
     }
     void mouseDrag(const juce::MouseEvent& e) override {if(!altReset)juce::Slider::mouseDrag(e);}
@@ -39,15 +41,28 @@ public:
     double proportionOfLengthToValue(double proportion) override {return 20.*std::pow(1000.,juce::jlimit(0.,1.,proportion));}
 private:
     bool altReset=false;
+    // Compares the click x to each thumb's own pixel position (via this
+    // slider's own value->proportion mapping, same one the LookAndFeel uses
+    // to place the thumbs) and fires only the callback for the nearer one.
+    void resetNearestThumb(const juce::MouseEvent& e){
+        const float w=float(getWidth());
+        if(w<=0.f)return;
+        const float minX=float(valueToProportionOfLength(getMinValue()))*w;
+        const float maxX=float(valueToProportionOfLength(getMaxValue()))*w;
+        const bool nearMin=std::abs(e.position.x-minX)<=std::abs(e.position.x-maxX);
+        if(nearMin){if(onResetMin)onResetMin();}else{if(onResetMax)onResetMax();}
+    }
 };
 
 class ModernDial final:public juce::Slider {
 public:
-    ModernDial(PocketLook&,juce::String,juce::String,juce::String,juce::uint32,bool=false,bool=false,bool=false);
+    // trailing infLabel overrides the "infinity" display text at full deflection
+    // (e.g. "AUTO"); empty means keep the default infinity glyph.
+    ModernDial(PocketLook&,juce::String,juce::String,juce::String,juce::uint32,bool=false,bool=false,bool=false,juce::String={});
     void paint(juce::Graphics&) override;
 private:
     PocketLook& look;
-    juce::String title,subtitle,unit;
+    juce::String title,subtitle,unit,infinityLabel;
     juce::uint32 accent;
     bool infinity,infinityAtMin,compact;
 };
@@ -66,7 +81,7 @@ private:
     DuckPocketAudioProcessor& audioProcessor;
     PocketLook look;
     ModernDial influence{look,"Influence","Depth","%",0xff5987ff};
-    ModernDial duration{look,"Duration","Sidechain length","ms",0xff32d4cb,true};
+    ModernDial duration{look,"Duration","Sidechain length","ms",0xff32d4cb,true,false,false,"AUTO"};
     ModernDial outputGain{look,"Output","dB","dB",0xfff1e84b,false,false,true};
     ResettableRangeSlider sidechainRange,processingRange;
     juce::Slider midSide;
