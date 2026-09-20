@@ -120,7 +120,9 @@ DuckPocketAudioProcessorEditor::DuckPocketAudioProcessorEditor(DuckPocketAudioPr
     setResizeLimits(800,530,1500,1400);getConstrainer()->setFixedAspectRatio(960./designHeight);setSize(width,juce::roundToInt(width*designHeight/960.));
     panelButton.setToggleState(expanded,juce::dontSendNotification);
     for(auto* c:{static_cast<juce::Component*>(&sidechainRange),static_cast<juce::Component*>(&processingRange),static_cast<juce::Component*>(&midSide)})c->setVisible(expanded);
-    pathPoints.reserve(4096);pathTop.reserve(4096);pathBottom.reserve(4096);bucketLo.reserve(4096);bucketHi.reserve(4096);bucketScratch.reserve(4096);
+    // Reserved to the column hard cap in graph() (8192) so a HiDPI display plus
+    // a maximised window never forces a reallocation mid-paint.
+    pathPoints.reserve(8192);pathTop.reserve(8192);pathBottom.reserve(8192);bucketLo.reserve(8192);bucketHi.reserve(8192);bucketScratch.reserve(8192);
     ready=true;p.editorWidth.store(width);p.editorExpanded.store(expanded);PocketTrace discard;while(p.popTrace(discard)){}p.editorOpen.store(true);frameTick();
     // VBlank-driven rendering, capped to 60 fps. This avoids timer jitter and
     // never queues frames faster than the monitor can present them.
@@ -185,7 +187,16 @@ void DuckPocketAudioProcessorEditor::graph(juce::Graphics& g,juce::Rectangle<flo
     const double now=(frozen||displayTime<=0.)?at(count-1).time:displayTime;
     const auto label=look.ink();
     juce::Graphics::ScopedSaveState clip(g);g.reduceClipRegion(plot.toNearestInt());
-    const int columns=juce::jlimit(2,4096,juce::roundToInt(plot.getWidth()));
+    // Column count must track *physical* pixels, not the fixed 960-wide design
+    // rect. `g` already carries the editor's own upscale transform (paint()
+    // applies getWidth()/960 before calling us) plus the OS/Retina device
+    // scale, so getPhysicalPixelScaleFactor() gives the true logical-to-device
+    // ratio in one number. Without this the trace was always built from ~600
+    // points (the design width) and then stretched to however big the window
+    // or display scale actually was, which is what made it look chunky/low-res
+    // once resized above ~960px or viewed on a HiDPI screen.
+    const float physicalScale=juce::jlimit(1.f,8.f,g.getInternalContext().getPhysicalPixelScaleFactor());
+    const int columns=juce::jlimit(2,8192,juce::roundToInt(plot.getWidth()*physicalScale));
     const float span=plot.getWidth()/float(columns-1);
     // Buckets are locked to absolute time, so every bucket always holds the same
     // samples while it scrolls; the fractional part of "now" shifts them by sub-pixel
