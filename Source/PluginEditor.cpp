@@ -223,19 +223,33 @@ void DuckPocketAudioProcessorEditor::graph(juce::Graphics& g,juce::Rectangle<flo
         bucketLo.swap(bucketScratch);bucketScratch=bucketHi;
         for(int c=1;c+1<columns;++c)if(bucketHi[size_t(c-1)]>=bucketLo[size_t(c-1)]&&bucketHi[size_t(c)]>=bucketLo[size_t(c)]&&bucketHi[size_t(c+1)]>=bucketLo[size_t(c+1)])bucketScratch[size_t(c)]=.25f*bucketHi[size_t(c-1)]+.5f*bucketHi[size_t(c)]+.25f*bucketHi[size_t(c+1)];
         bucketHi.swap(bucketScratch);pathTop.clear();pathBottom.clear();
-        for(int c=0;c<columns;++c){if(bucketHi[size_t(c)]<bucketLo[size_t(c)])continue;const float lo=bucketLo[size_t(c)],hi=bucketHi[size_t(c)];if(juce::jmax(std::abs(lo),std::abs(hi))<=1e-5f)continue;const float x=plot.getX()+float(c)*span;const float a=plot.getCentreY()-hi*plot.getHeight()*.5f,b=plot.getCentreY()-lo*plot.getHeight()*.5f;pathTop.push_back({x,a});pathBottom.push_back({x,b});}
-        if(pathTop.size()<2)continue;
-        juce::Path body;
-        body.startNewSubPath(pathTop.front());
-        for(size_t i=1;i+1<pathTop.size();++i)body.quadraticTo(pathTop[i],(pathTop[i]+pathTop[i+1])*.5f);
-        body.lineTo(pathTop.back());
-        body.lineTo(pathBottom.back());
-        for(size_t i=pathBottom.size()-1;i>1;--i)body.quadraticTo(pathBottom[i-1],(pathBottom[i-1]+pathBottom[i-2])*.5f);
-        body.lineTo(pathBottom.front());body.closeSubPath();
+        // No centre trace in silence: only columns whose envelope is visibly above
+        // the noise floor are drawn. Each audible run becomes its own shape that
+        // tapers to the centre line at both ends, so nothing is drawn across gaps.
+        constexpr float silenceThreshold=.004f;
+        const float midY=plot.getCentreY();
+        auto active=[&](int c){const float lo=bucketLo[size_t(c)],hi=bucketHi[size_t(c)];return hi>=lo&&juce::jmax(std::abs(lo),std::abs(hi))>silenceThreshold;};
         const auto colour=kind?(look.isAmber()?look.accent2():look.pick(0xff3794d4,0xff8e8e8e,0xff59616b)):label;
-        if(glow){g.setColour(colour.withAlpha(.12f));g.strokePath(body,juce::PathStrokeType(3.5f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));}
-        g.setColour(colour.withAlpha(kind?.28f:.36f));g.fillPath(body);
-        g.setColour(colour.withAlpha(kind?.86f:.96f));g.strokePath(body,juce::PathStrokeType(1.25f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));
+        for(int c=0;c<columns;){
+            if(!active(c)){++c;continue;}
+            int e=c;while(e+1<columns&&active(e+1))++e;
+            pathTop.clear();pathBottom.clear();
+            const float x0=plot.getX()+float(c-1)*span,x1=plot.getX()+float(e+1)*span;
+            pathTop.push_back({x0,midY});pathBottom.push_back({x0,midY});
+            for(int i=c;i<=e;++i){const float x=plot.getX()+float(i)*span;pathTop.push_back({x,midY-bucketHi[size_t(i)]*plot.getHeight()*.5f});pathBottom.push_back({x,midY-bucketLo[size_t(i)]*plot.getHeight()*.5f});}
+            pathTop.push_back({x1,midY});pathBottom.push_back({x1,midY});
+            c=e+1;
+            juce::Path body;
+            body.startNewSubPath(pathTop.front());
+            for(size_t i=1;i+1<pathTop.size();++i)body.quadraticTo(pathTop[i],(pathTop[i]+pathTop[i+1])*.5f);
+            body.lineTo(pathTop.back());
+            body.lineTo(pathBottom.back());
+            for(size_t i=pathBottom.size()-1;i>1;--i)body.quadraticTo(pathBottom[i-1],(pathBottom[i-1]+pathBottom[i-2])*.5f);
+            body.lineTo(pathBottom.front());body.closeSubPath();
+            if(glow){g.setColour(colour.withAlpha(.12f));g.strokePath(body,juce::PathStrokeType(3.5f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));}
+            g.setColour(colour.withAlpha(kind?.28f:.36f));g.fillPath(body);
+            g.setColour(colour.withAlpha(kind?.86f:.96f));g.strokePath(body,juce::PathStrokeType(1.25f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));
+        }
     }
 }
 void DuckPocketAudioProcessorEditor::paintChrome(juce::Graphics& g){
