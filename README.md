@@ -20,7 +20,7 @@ See `V010-NOTES.md` for implementation details and test coverage.
 
 ## Processing
 
-A 5 ms lookahead soft-attack ducker. Influence 0-100 is linear depth; 100-150 is exponential. Duration sets the total key length with the last 20% fading out; 2000 ms means infinity. The key filter is a non-resonant 12 dB/oct HP+LP and full-range endpoints bypass it. M/S balance changes processing depth, not output level.
+A 5 ms lookahead soft-attack ducker. Influence 0-100 is linear depth; 100-150 is exponential. Duration sets the total key length (5 ms minimum): the first half holds, the second half fades out; 2000 ms means infinity. Changes apply live and every new hit restarts the event. The key filter is a non-resonant 12 dB/oct HP+LP and full-range endpoints bypass it. M/S balance changes processing depth, not output level.
 
 Processing Range is a subtractive dynamic bell/shelf. The dry path is never permanently filtered; with no reduction the output is latency-aligned dry.
 

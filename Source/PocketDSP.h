@@ -19,9 +19,9 @@ class Engine {
     int lookahead=240,refractory=0,quiet=0,rearmQuiet=0;
     double rate=48000;
     float amount=1,targetAmount=1,ms=0,targetMs=0,targetBypass=0,bypassMix=0,outputGain=1,targetOutputGain=1;
-    float duration=2000,targetDuration=2000,eventDuration=2000,envelope=0,fast=0,slow=0,eventPeak=0,smoothedControl=0;
+    float duration=2000,targetDuration=2000,envelope=0,fast=0,slow=0,eventPeak=0,smoothedControl=0;
     float fastC=0,slowC=0,releaseC=0,endC=0,slew=0,attackC=0,bypassC=0;
-    bool active=false,onsetHighPreviously=false,triggerArmed=true;
+    bool active=false,onsetHighPreviously=false,triggerArmed=true,durationInit=false,strongPreviously=false;
     static float clean(float v) noexcept { return std::isfinite(v)?v:0.f; }
 public:
     // 5 ms of lookahead: the gain starts moving before the transient arrives so the
@@ -30,7 +30,8 @@ public:
     static float durationGain(double elapsedMs,float lengthMs) noexcept {
         if(lengthMs>=1999.5f)return 1;
         const double length=std::clamp(double(lengthMs),1.,2000.);
-        const double t=std::clamp((elapsedMs-length*.8)/(length*.2),0.,1.);
+        // Duration is the total length: half hold, then a half-cosine fade over the other half.
+        const double t=std::clamp((elapsedMs-length*.5)/(length*.5),0.,1.);
         return float(.5+.5*std::cos(3.141592653589793*t));
     }
     Engine(){reset(48000,1);}
@@ -42,15 +43,15 @@ public:
         filter.reset(rate);processingFilter.reset(rate);
         amount=targetAmount=std::clamp(influence,0.f,1.5f);
         ms=targetMs=targetBypass=bypassMix=0;outputGain=targetOutputGain=1;envelope=fast=slow=eventPeak=0;smoothedControl=0;
-        active=onsetHighPreviously=false;triggerArmed=true;
+        active=onsetHighPreviously=strongPreviously=false;triggerArmed=true;
         fastC=float(std::exp(-1/(rate*.0015)));slowC=float(std::exp(-1/(rate*.035)));
         releaseC=float(std::exp(-1/(rate*.04)));endC=float(std::exp(-1/(rate*.002)));
         attackC=float(std::exp(-1/(rate*.0016)));
         bypassC=float(std::exp(-1/(rate*.0025)));
-        slew=float(std::exp(-1/(rate*.005)));duration=targetDuration=eventDuration=2000;
+        slew=float(std::exp(-1/(rate*.005)));duration=targetDuration=2000;durationInit=false;
     }
     void configure(float influence,float durationMs,float low=20,float high=20000,bool bypassed=false,float balance=0,float processLow=20,float processHigh=20000,float outputDb=0) noexcept {
-        targetAmount=std::clamp(clean(influence),0.f,1.5f);targetDuration=std::clamp(clean(durationMs),1.f,2000.f);
+        targetAmount=std::clamp(clean(influence),0.f,1.5f);targetDuration=std::clamp(clean(durationMs),5.f,2000.f);if(!durationInit){duration=targetDuration;durationInit=true;}
         filter.set(clean(low),clean(high));processingFilter.set(clean(processLow),clean(processHigh));
         targetMs=std::clamp(clean(balance),-1.f,1.f);targetBypass=bypassed?1.f:0.f;
         const float safeDb=std::clamp(clean(outputDb),-12.f,6.f);targetOutputGain=std::pow(10.f,safeDb/20.f);
@@ -78,10 +79,22 @@ public:
             rearmQuiet=level<resetLevel?rearmQuiet+1:0;
             if(rearmQuiet>int(rate*.004)){triggerArmed=true;eventPeak=0;rearmQuiet=0;onsetHighPreviously=false;}
         }
-        const bool trigger=triggerArmed&&refractory==0&&(onset||(!active&&level>1e-5f));
-        if(trigger){active=true;triggerArmed=false;age=0;quiet=0;rearmQuiet=0;eventPeak=level;eventDuration=targetDuration;duration=eventDuration;refractory=std::max(1,int(rate*.012));}
+        // A clear new transient always starts a new event, even if the previous key
+        // is still ringing and the trigger was never re-armed by a quiet gap. Without
+        // this a finite Duration ducked once and then stayed silent for any key that
+        // does not fall 60 dB between hits. The stricter ratio keeps slow ripple of a
+        // sustained low tone from restarting the event.
+        const bool armedStart=triggerArmed&&refractory==0&&(onset||(!active&&level>1e-5f));
+        // Hysteresis (2.5x to enter, 1.2x to leave) so ripple inside one hit is not mistaken for a new hit.
+        const bool strongHigh=level>1e-7f&&fast>std::max(1e-7f,slow*(strongPreviously?1.2f:2.5f));
+        const bool hitStart=!triggerArmed&&strongHigh&&!strongPreviously&&refractory==0;
+        strongPreviously=strongHigh;
+        if(armedStart||hitStart){active=true;triggerArmed=false;age=0;quiet=0;rearmQuiet=0;eventPeak=level;refractory=std::max(1,int(rate*.012));}
+        // Duration is read live (lightly slewed), so turning the knob takes effect on
+        // the sound that is already playing instead of waiting for the next event.
+        duration=targetDuration+slew*(duration-targetDuration);if(std::abs(duration-targetDuration)<.01f)duration=targetDuration;
         envelope=std::max(level,envelope*(active?releaseC:endC));if(envelope<1e-7f)envelope=0;
-        const float gate=eventDuration>=1999.5f?1.f:(active?durationGain(double(age)*1000/rate,eventDuration):0.f);
+        const float gate=duration>=1999.5f?1.f:(active?durationGain(double(age)*1000/rate,duration):0.f);
         const float control=envelope*gate;if(active)++age;
         while(head!=tail&&clock>std::uint64_t(lookahead)&&peaks[head].index<clock-std::uint64_t(lookahead))head=(head+1)%peaks.size();
         while(head!=tail){size_t last=(tail+peaks.size()-1)%peaks.size();if(peaks[last].value>control)break;tail=last;}

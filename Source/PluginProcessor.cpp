@@ -58,7 +58,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DuckPocketAudioProcessor::la
     p.push_back(std::make_unique<juce::AudioParameterFloat>("scHigh","Sidechain High",logHzRange(),20000.f));
     p.push_back(std::make_unique<juce::AudioParameterBool>("bypass","Bypass",false));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("msBalance","M/S balance",juce::NormalisableRange<float>(-1,1,.001f),0.f));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("duration","Duration",juce::NormalisableRange<float>(1,2000,1,.35f),2000.f));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("duration","Duration",juce::NormalisableRange<float>(5,2000,1,.35f),2000.f));
     legacyFloat("sustain","Legacy Sustain (fixed zero)",0.f,100.f,0.f);
     p.push_back(std::make_unique<juce::AudioParameterFloat>("processLow","Processing Low",logHzRange(),20.f));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("processHigh","Processing High",logHzRange(),20000.f));

@@ -30,12 +30,12 @@ static double bandGain(double frequency){
 int main(){
     check(pocket::Engine::latencyForRate(48000)==240,"5 ms = 240 samples");
     check(pocket::Engine::latencyForRate(44100)==221,"44.1k latency rounds up");
-    for(float d:{1.f,2.f,5.f,10.f,100.f,200.f}){check(pocket::Engine::durationGain(d*.8,d)>.9999f,"full hold at 80 percent");check(std::abs(pocket::Engine::durationGain(d*.9,d)-.5f)<1e-5f,"half fade at 90 percent");check(pocket::Engine::durationGain(d,d)<1e-6f,"zero at requested duration");}
+    for(float d:{5.f,10.f,100.f,200.f}){check(pocket::Engine::durationGain(d*.5,d)>.9999f,"full hold at 50 percent");check(std::abs(pocket::Engine::durationGain(d*.75,d)-.5f)<1e-5f,"half fade at 75 percent");check(pocket::Engine::durationGain(d,d)<1e-6f,"zero at requested duration");}
     for(double sr:{44100.,48000.,96000.,192000.}){
         const int latency=pocket::Engine::latencyForRate(sr);std::mt19937 random(17);std::uniform_real_distribution<float> noise(-.8f,.8f);std::vector<std::array<float,2>> input(16000);for(auto& s:input)s={noise(random),noise(random)};
         for(bool noKey:{true,false}){auto e=std::make_unique<pocket::Engine>();e->reset(sr,noKey?1.f:0.f);e->configure(noKey?1.f:0.f,2000);for(size_t i=0;i<input.size();++i){auto v=e->process(input[i],noKey?std::array<float,2>{0,0}:std::array<float,2>{noise(random),noise(random)});auto wanted=i>=size_t(latency)?input[i-size_t(latency)]:std::array<float,2>{0,0};check(v.out==wanted,"delayed dry identity");}}
         {auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(1,2000);float previous=1;bool monotonic=true;for(int n=0;n<latency+8;++n){float x=n==0?1.f:0.f;auto v=e->process({x,x},{x,x});if(n>0&&n<=latency){if(v.gain>previous+1e-6f)monotonic=false;previous=v.gain;}if(n==latency){check(std::abs(v.out[0])<.08f,"soft attack still catches the impulse");check(monotonic,"gain ramps down smoothly inside the lookahead");}}}
-        for(float duration:{1.f,2.f,5.f,10.f,100.f,200.f}){auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(1,duration);float beforeFade=1,halfFade=0,afterEnd=0;for(int n=0;n<int(sr*.27)+latency;++n){auto v=e->process({1,1},{.8f,.8f});int aligned=n-latency;if(aligned<0)continue;double ms=aligned*1000./sr;if(aligned==int(std::floor(duration*.75*sr*.001)))beforeFade=v.gain;if(aligned==int(std::ceil(duration*.9*sr*.001)))halfFade=v.gain;if(ms>=duration+.1){afterEnd=v.gain;check(std::abs(v.gain-1)<1e-5f,"no smoothing extension or event retrigger");}}check(beforeFade<.3f,"duration keeps depth before fade");check(halfFade>.3f&&halfFade<.9f,"audible proportional fade");check(afterEnd>.9999f,"1 ms length is real");}
+        for(float duration:{5.f,10.f,100.f,200.f}){auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(1,duration);float beforeFade=1,halfFade=0,afterEnd=0;for(int n=0;n<int(sr*.27)+latency;++n){auto v=e->process({1,1},{.8f,.8f});int aligned=n-latency;if(aligned<0)continue;double ms=aligned*1000./sr;if(aligned==int(std::floor(duration*.45*sr*.001)))beforeFade=v.gain;if(aligned==int(std::ceil(duration*.75*sr*.001)))halfFade=v.gain;if(ms>=duration+.1){afterEnd=v.gain;check(std::abs(v.gain-1)<1e-5f,"no smoothing extension or event retrigger");}}check(beforeFade<.3f,"duration keeps depth before fade");check(halfFade>.3f&&halfFade<.9f,"audible proportional fade");check(afterEnd>.9999f,"requested length is real");}
         for(float balance:{-1.f,1.f}){auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(1,2000,20,20000,false,balance);pocket::Sample v;for(int n=0;n<int(sr*.2);++n)v=e->process(balance<0?std::array<float,2>{.5f,-.5f}:std::array<float,2>{.5f,.5f},{1,1});check(std::abs(v.out[0]-.5f)<1e-5f,"M/S leaves excluded component dry");}
         {   // Bypass crossfades to latency-aligned dry without a discontinuity.
             auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(1,2000);
@@ -78,14 +78,32 @@ int main(){
         for(int n=0;n<int(sr*.4);++n){const float x=n2(rng),k=n%4800<128?.9f:0.f;
             check(wide->process({x,x},{k,k}).out==parked->process({x,x},{k,k}).out,"parked processing range stays bit identical to the wideband duck");}
     }
-    {   // Duration is latched at event start: automation cannot jump the current envelope.
+    {   // Duration is read live: turning the knob shortens/lengthens the sound that is already playing.
         constexpr double sr=48000.;auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(1,200);
         float during=1;
         for(int n=0;n<int(sr*.08);++n){if(n==int(sr*.02))e->configure(1,1);during=e->process({1,1},{.8f,.8f}).gain;}
-        check(during<.35f,"duration automation leaves active event continuous");
+        check(during>.99f,"duration automation applies to the running event");
         for(int n=0;n<int(sr*.03);++n)e->process({1,1},{0,0});
         float next=0;for(int n=0;n<int(sr*.02);++n)next=e->process({1,1},{.8f,.8f}).gain;
         check(next>.99f,"new event uses newly automated short duration");
+    }
+    {   // Finite Duration must keep ducking every hit (it used to duck twice and then stop),
+        // the minimum is 5 ms, and the fade is half hold / half fade.
+        constexpr double sr=48000.;const double PI=3.14159265358979;
+        for(float duration:{5.f,50.f,100.f}){
+            auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(1,duration);
+            const int period=int(sr*.5);float minGain[8];for(auto& m:minGain)m=1;
+            for(int n=0;n<period*8;++n){const double t=double(n%period)/sr;
+                const float k=float(.9*std::exp(-t/.4)*std::sin(2*PI*(50+120*std::exp(-t/.02))*t));
+                const auto v=e->process({.3f,.3f},{k,k});if(n>e->latency())minGain[n/period]=std::min(minGain[n/period],v.gain);}
+            for(int b=0;b<8;++b)check(minGain[b]<.35f,"finite duration keeps ducking on every hit");
+        }
+        {auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(1,1);float g=0;
+         const int latency=e->latency();for(int n=0;n<int(sr*.1);++n){const float k=n<int(sr*.05)?.8f:0.f;const auto v=e->process({1,1},{k,k});if(n==latency+int(sr*.03))g=v.gain;}
+         check(g>.99f,"minimum duration is 5 ms, not 1 ms");}
+        {auto e=std::make_unique<pocket::Engine>();e->reset(sr);e->configure(1,100);float half=1,late=0;
+         const int latency=e->latency();for(int n=0;n<int(sr*.2);++n){const auto v=e->process({1,1},{.8f,.8f});const int a=n-latency;if(a==int(sr*.04))half=v.gain;if(a==int(sr*.11))late=v.gain;}
+         check(half<.3f,"first half of the duration holds full depth");check(late>.99f,"sound is fully released by the requested duration");}
     }
     {   // Invalid host/input values must never escape as NaN/Inf.
         auto e=std::make_unique<pocket::Engine>();e->reset(48000);e->configure(NAN,NAN,NAN,INFINITY,false,NAN,NAN,INFINITY,NAN);
