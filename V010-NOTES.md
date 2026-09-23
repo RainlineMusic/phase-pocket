@@ -1,4 +1,8 @@
-# Duck Pocket v0.10
+# Duck Pocket v0.10 (historical notes)
+
+These notes describe development before v1.0.0. For the current rendering
+budget, parameter list and Pro Tools test procedure, use `README.md` and
+`PERFORMANCE-VALIDATION.md`.
 
 ## Display and UI
 

@@ -120,18 +120,15 @@ DuckPocketAudioProcessorEditor::DuckPocketAudioProcessorEditor(DuckPocketAudioPr
     setResizeLimits(800,530,1500,1400);getConstrainer()->setFixedAspectRatio(960./designHeight);setSize(width,juce::roundToInt(width*designHeight/960.));
     panelButton.setToggleState(expanded,juce::dontSendNotification);
     for(auto* c:{static_cast<juce::Component*>(&sidechainRange),static_cast<juce::Component*>(&processingRange),static_cast<juce::Component*>(&midSide)})c->setVisible(expanded);
-    // Reserved to the column hard cap in graph() (8192) so a HiDPI display plus
-    // a maximised window never forces a reallocation mid-paint.
-    pathPoints.reserve(8192);pathTop.reserve(8192);pathBottom.reserve(8192);bucketLo.reserve(8192);bucketHi.reserve(8192);bucketScratch.reserve(8192);
+    // A fixed column budget bounds path construction inside the host GUI.
+    pathPoints.reserve(1200);pathTop.reserve(1202);pathBottom.reserve(1202);bucketLo.reserve(1200);bucketHi.reserve(1200);bucketScratch.reserve(1200);
     ready=true;p.editorWidth.store(width);p.editorExpanded.store(expanded);PocketTrace discard;while(p.popTrace(discard)){}p.editorOpen.store(true);frameTick();
-    // VBlank-driven rendering, capped to 60 fps. This avoids timer jitter and
-    // never queues frames faster than the monitor can present them.
+    // VBlank-driven rendering: long windows have a 30 fps budget; short
+    // windows retain the 60 fps interaction rate.
     vblank=std::make_unique<juce::VBlankAttachment>(this,[this]{
-        // nextFrameMs holds the time of the last rendered frame. Frames are only
-        // dropped when vblanks come faster than ~110 Hz, never because of small
-        // timing jitter at 60 Hz (a skipped vblank shows up as a visible hitch).
         const double now=juce::Time::getMillisecondCounterHiRes();
-        if(nextFrameMs>0&&now-nextFrameMs<9.0)return;
+        const double minimumGap=gainWindow>=2.?28.0:9.0;
+        if(nextFrameMs>0&&now-nextFrameMs<minimumGap)return;
         nextFrameMs=now;
         frameTick();
     });
@@ -140,14 +137,15 @@ DuckPocketAudioProcessorEditor::~DuckPocketAudioProcessorEditor(){vblank.reset()
 void DuckPocketAudioProcessorEditor::saveSize(){if(!ready||!preferences)return;audioProcessor.editorWidth.store(getWidth());audioProcessor.editorExpanded.store(expanded);preferences->setValue("duckPocket.ui.width",getWidth());preferences->setValue("duckPocket.ui.expanded",expanded);preferences->saveIfNeeded();resizeStamp=0;}
 void DuckPocketAudioProcessorEditor::invalidateChrome(){chromeValid=false;repaint();}
 void DuckPocketAudioProcessorEditor::setTheme(PocketTheme t,bool persist){look.theme=t;if(persist&&preferences){preferences->setValue("duckPocket.ui.theme",t==PocketTheme::Neon?"neon":(t==PocketTheme::Amber?"amber":(t==PocketTheme::SolidDark?"solidDark":"solidWhite")));preferences->saveIfNeeded();}chromeValid=false;repaint();for(auto* c:getChildren())c->repaint();if(bypassMix>0)juce::MessageManager::callAsync([safe=juce::Component::SafePointer<DuckPocketAudioProcessorEditor>(this)]{if(safe)safe->captureBlurSnapshot();});}
-void DuckPocketAudioProcessorEditor::setHistoryWindow(bool,double seconds){gainWindow=scopeWindow=seconds;preferences->setValue("duckPocket.ui.graphWindow",seconds);preferences->setValue("duckPocket.ui.gainWindow",seconds);preferences->setValue("duckPocket.ui.scopeWindow",seconds);preferences->saveIfNeeded();invalidateChrome();}
+void DuckPocketAudioProcessorEditor::setHistoryWindow(double seconds){gainWindow=scopeWindow=seconds;preferences->setValue("duckPocket.ui.graphWindow",seconds);preferences->saveIfNeeded();invalidateChrome();}
 // A single snowflake button freezes and resumes both graphs together.
 void DuckPocketAudioProcessorEditor::setFrozen(bool frozen){
-    gainFrozen=scopeFrozen=frozen;frozenGain.clear();frozenScope.clear();
+    gainFrozen=scopeFrozen=frozen;frozenGain.clear();frozenSummary.clear();
     if(frozen){
         frozenGain.reserve(size_t(filled));
         for(int i=0;i<filled;++i)frozenGain.push_back(history[size_t((cursor-filled+i+historyCapacity)%historyCapacity)]);
-        frozenScope=frozenGain;
+        frozenSummary.reserve(size_t(summaryFilled));
+        for(int i=0;i<summaryFilled;++i)frozenSummary.push_back(summaryHistory[size_t((summaryCursor-summaryFilled+i+summaryCapacity)%summaryCapacity)]);
     }else{
         const double resume=filled?history[size_t((cursor+historyCapacity-1)%historyCapacity)].time:0.;
         gainResume=scopeResume=resume;
@@ -155,7 +153,7 @@ void DuckPocketAudioProcessorEditor::setFrozen(bool frozen){
     freezeButton.setToggleState(frozen,juce::dontSendNotification);freezeButton.repaint();
     repaint(gainArea);repaint(scopeArea);
 }
-void DuckPocketAudioProcessorEditor::showSettingsMenu(){juce::PopupMenu root,window,theme;for(size_t i=0;i<windows.size();++i)window.addItem(int(i)+1,timeLabel(windows[i]),true,std::abs(gainWindow-windows[i])<1e-6);theme.addItem(201,"Neon",true,look.theme==PocketTheme::Neon);theme.addItem(204,"Amber",true,look.theme==PocketTheme::Amber);theme.addItem(202,"Solid Dark",true,look.theme==PocketTheme::SolidDark);theme.addItem(203,"Solid White",true,look.theme==PocketTheme::SolidWhite);root.addSubMenu("Graph window",window);root.addSeparator();root.addSubMenu("Theme",theme);auto safe=juce::Component::SafePointer<DuckPocketAudioProcessorEditor>(this);root.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(settingsButton),[safe](int id){if(!safe||id==0)return;if(id>=1&&id<=6)safe->setHistoryWindow(true,windows[size_t(id-1)]);else if(id==201)safe->setTheme(PocketTheme::Neon);else if(id==204)safe->setTheme(PocketTheme::Amber);else if(id==202)safe->setTheme(PocketTheme::SolidDark);else if(id==203)safe->setTheme(PocketTheme::SolidWhite);});}
+void DuckPocketAudioProcessorEditor::showSettingsMenu(){juce::PopupMenu root,window,theme;for(size_t i=0;i<windows.size();++i)window.addItem(int(i)+1,timeLabel(windows[i]),true,std::abs(gainWindow-windows[i])<1e-6);theme.addItem(201,"Neon",true,look.theme==PocketTheme::Neon);theme.addItem(204,"Amber",true,look.theme==PocketTheme::Amber);theme.addItem(202,"Solid Dark",true,look.theme==PocketTheme::SolidDark);theme.addItem(203,"Solid White",true,look.theme==PocketTheme::SolidWhite);root.addSubMenu("Graph window",window);root.addSeparator();root.addSubMenu("Theme",theme);auto safe=juce::Component::SafePointer<DuckPocketAudioProcessorEditor>(this);root.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(settingsButton),[safe](int id){if(!safe||id==0)return;if(id>=1&&id<=6)safe->setHistoryWindow(windows[size_t(id-1)]);else if(id==201)safe->setTheme(PocketTheme::Neon);else if(id==204)safe->setTheme(PocketTheme::Amber);else if(id==202)safe->setTheme(PocketTheme::SolidDark);else if(id==203)safe->setTheme(PocketTheme::SolidWhite);});}
 void DuckPocketAudioProcessorEditor::setPanelExpanded(bool open){expanded=open;audioProcessor.editorExpanded.store(open);if(preferences){preferences->setValue("duckPocket.ui.expanded",open);preferences->saveIfNeeded();}panelButton.setToggleState(open,juce::dontSendNotification);panelButton.setTooltip(open?"Hide advanced controls":"Show sidechain, processing range and M/S balance");for(auto* c:{static_cast<juce::Component*>(&sidechainRange),static_cast<juce::Component*>(&processingRange),static_cast<juce::Component*>(&midSide)})c->setVisible(open);double height=open?890.:636.;getConstrainer()->setFixedAspectRatio(960./height);setSize(getWidth(),juce::roundToInt(getWidth()*height/960.));resized();invalidateChrome();}
 // Read the values straight from the parameters. The raw atomics are updated by a
 // separate listener that can run *after* this attachment callback, so when a host
@@ -177,10 +175,13 @@ void DuckPocketAudioProcessorEditor::graph(juce::Graphics& g,juce::Rectangle<flo
     const bool glow=look.hasGlow();
     const juce::Rectangle<float> plot(box.getX()+18,box.getY()+47,box.getWidth()-70,box.getHeight()-87);
     const bool frozen=gain?gainFrozen:scopeFrozen;
-    const auto& snap=gain?frozenGain:frozenScope;
-    const int count=frozen?int(snap.size()):filled;
+    // The two-millisecond rollup preserves min/max peaks while reducing the
+    // five-second scan from ~12k records to ~2.5k records per graph.
+    const bool longWindow=(gain?gainWindow:scopeWindow)>=2.;
+    const auto& snap=longWindow?frozenSummary:frozenGain;
+    const int count=frozen?int(snap.size()):(longWindow?summaryFilled:filled);
     if(count<2)return;
-    auto at=[&](int i)->const PocketTrace& {return frozen?snap[size_t(i)]:history[size_t((cursor-count+i+historyCapacity)%historyCapacity)];};
+    auto at=[&](int i)->const PocketTrace& {return frozen?snap[size_t(i)]:(longWindow?summaryHistory[size_t((summaryCursor-count+i+summaryCapacity)%summaryCapacity)]:history[size_t((cursor-count+i+historyCapacity)%historyCapacity)]);};
     const double window=gain?gainWindow:scopeWindow,resume=gain?gainResume:scopeResume;
     // Smoothed display clock (see frameTick) instead of "time of the newest packet",
     // which advances in audio-block sized steps and made the whole graph stutter.
@@ -196,7 +197,7 @@ void DuckPocketAudioProcessorEditor::graph(juce::Graphics& g,juce::Rectangle<flo
     // or display scale actually was, which is what made it look chunky/low-res
     // once resized above ~960px or viewed on a HiDPI screen.
     const float physicalScale=juce::jlimit(1.f,8.f,g.getInternalContext().getPhysicalPixelScaleFactor());
-    const int columns=juce::jlimit(2,8192,juce::roundToInt(plot.getWidth()*physicalScale));
+    const int columns=juce::jlimit(2,1200,juce::roundToInt(plot.getWidth()*physicalScale));
     const float span=plot.getWidth()/float(columns-1);
     // Buckets are locked to absolute time, so every bucket always holds the same
     // samples while it scrolls; the fractional part of "now" shifts them by sub-pixel
@@ -237,7 +238,10 @@ void DuckPocketAudioProcessorEditor::graph(juce::Graphics& g,juce::Rectangle<flo
         for(int c=1;c+1<columns;++c)if(bucketLo[size_t(c-1)]<=1.f&&bucketLo[size_t(c)]<=1.f&&bucketLo[size_t(c+1)]<=1.f)bucketScratch[size_t(c)]=.25f*bucketLo[size_t(c-1)]+.5f*bucketLo[size_t(c)]+.25f*bucketLo[size_t(c+1)];
         bucketLo.swap(bucketScratch);pathPoints.clear();
         for(int c=0;c<columns;++c)if(bucketLo[size_t(c)]<=1.f)pathPoints.push_back({xOf(c),plot.getBottom()-bucketLo[size_t(c)]*plot.getHeight()});
-        if(pathPoints.size()>1)glowStroke(g,smoothPath(pathPoints),label,1.65f,glow);
+        if(pathPoints.size()>1){
+            if(longWindow){juce::Path path;path.startNewSubPath(pathPoints.front());for(size_t i=1;i<pathPoints.size();++i)path.lineTo(pathPoints[i]);stroke(g,path,label,1.65f);}
+            else glowStroke(g,smoothPath(pathPoints),label,1.65f,glow);
+        }
         return;
     }
 
@@ -270,12 +274,13 @@ void DuckPocketAudioProcessorEditor::graph(juce::Graphics& g,juce::Rectangle<flo
             c=e+1;
             juce::Path body;
             body.startNewSubPath(pathTop.front());
-            for(size_t i=1;i+1<pathTop.size();++i)body.quadraticTo(pathTop[i],(pathTop[i]+pathTop[i+1])*.5f);
-            body.lineTo(pathTop.back());
+            if(longWindow){for(size_t i=1;i<pathTop.size();++i)body.lineTo(pathTop[i]);}
+            else {for(size_t i=1;i+1<pathTop.size();++i)body.quadraticTo(pathTop[i],(pathTop[i]+pathTop[i+1])*.5f);body.lineTo(pathTop.back());}
             body.lineTo(pathBottom.back());
-            for(size_t i=pathBottom.size()-1;i>1;--i)body.quadraticTo(pathBottom[i-1],(pathBottom[i-1]+pathBottom[i-2])*.5f);
+            if(longWindow){for(size_t i=pathBottom.size()-1;i>0;--i)body.lineTo(pathBottom[i-1]);}
+            else for(size_t i=pathBottom.size()-1;i>1;--i)body.quadraticTo(pathBottom[i-1],(pathBottom[i-1]+pathBottom[i-2])*.5f);
             body.lineTo(pathBottom.front());body.closeSubPath();
-            if(glow){g.setColour(colour.withAlpha(.12f));g.strokePath(body,juce::PathStrokeType(3.5f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));}
+            if(glow&&!longWindow){g.setColour(colour.withAlpha(.12f));g.strokePath(body,juce::PathStrokeType(3.5f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));}
             // No outline: the wave itself is filled with the colour the outline used to have.
             g.setColour(colour.withAlpha(kind?.9f:.86f));g.fillPath(body);
         }
@@ -382,7 +387,14 @@ void DuckPocketAudioProcessorEditor::paintOverChildren(juce::Graphics& g){
 void DuckPocketAudioProcessorEditor::frameTick(){
     if(resizeStamp>0&&juce::Time::getMillisecondCounterHiRes()-resizeStamp>400)saveSize();
     PocketTrace v;bool fresh=false;
-    while(audioProcessor.popTrace(v)){if(!std::isfinite(v.time))continue;history[size_t(cursor)]=v;cursor=(cursor+1)%historyCapacity;filled=juce::jmin(filled+1,historyCapacity);fresh=true;}
+    while(audioProcessor.popTrace(v)){
+        if(!std::isfinite(v.time))continue;
+        history[size_t(cursor)]=v;cursor=(cursor+1)%historyCapacity;filled=juce::jmin(filled+1,historyCapacity);
+        const auto bin=static_cast<long long>(std::floor(v.time*500.));
+        if(bin!=summaryBin){summaryBin=bin;summaryHistory[size_t(summaryCursor)]=v;summaryCursor=(summaryCursor+1)%summaryCapacity;summaryFilled=juce::jmin(summaryFilled+1,summaryCapacity);}
+        else {auto& s=summaryHistory[size_t((summaryCursor+summaryCapacity-1)%summaryCapacity)];s.keyLo=juce::jmin(s.keyLo,v.keyLo);s.keyHi=juce::jmax(s.keyHi,v.keyHi);s.outLo=juce::jmin(s.outLo,v.outLo);s.outHi=juce::jmax(s.outHi,v.outHi);s.gain=juce::jmin(s.gain,v.gain);s.time=v.time;}
+        fresh=true;
+    }
     if(filled>0){
         // Display clock: runs on wall-clock time and is gently steered towards the
         // newest audio timestamp minus a small safety lag. Audio arrives in bursts

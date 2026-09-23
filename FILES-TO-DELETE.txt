@@ -1,0 +1,13 @@
+Apply these files over the original duck-pocket-Release-1.0 folder.
+Also delete the following obsolete files from that folder:
+- BUILD-OSCILLOSCOPE-GRID.md
+- Tests/dsp_test.cpp
+- Tests/spectral_budget_test.cpp
+- Tests/v03_test.cpp
+- Tests/v04_test.cpp
+- Tests/v05_test.cpp
+- Tests/v06_test.cpp
+- Tests/v07_test.cpp
+- Tests/v08_test.cpp
+- Tests/v09_test.cpp
+- build-macos.workflow.yml

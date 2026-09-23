@@ -3,7 +3,7 @@
 #include "PocketDSP.h"
 
 struct PocketTrace {
-    float inLo=0, inHi=0, keyLo=0, keyHi=0, outLo=0, outHi=0, gain=1;
+    float keyLo=0, keyHi=0, outLo=0, outHi=0, gain=1;
     double time=0;
 };
 

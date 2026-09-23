@@ -33,33 +33,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout DuckPocketAudioProcessor::la
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> p;
     p.push_back(std::make_unique<juce::AudioParameterFloat>("amount","Influence",juce::NormalisableRange<float>(0,150,.1f),100.f));
 
-    // Keep old IDs loadable, but mark them as non-automatable metadata so new
-    // sessions do not present dead controls as normal automation destinations.
-    const auto legacyFloat=[&p](const char* id,const char* name,float lo,float hi,float def){
-        p.push_back(std::make_unique<juce::AudioParameterFloat>(
-            juce::ParameterID{id,1},name,juce::NormalisableRange<float>(lo,hi),def,
-            juce::AudioParameterFloatAttributes().withAutomatable(false).withMeta(true)));
-    };
-    legacyFloat("tolerance","Legacy Tolerance",0.f,6.f,1.f);
-    legacyFloat("low","Legacy Low",20.f,150.f,25.f);
-    legacyFloat("high","Legacy High",80.f,500.f,220.f);
-    legacyFloat("maxReduction","Legacy Reduction",0.f,48.f,24.f);
-    p.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"release",1},"Legacy Smoothing (fixed 40 ms)",juce::NormalisableRange<float>(0,500,.1f,.4f),40.f,
-        juce::AudioParameterFloatAttributes().withAutomatable(false).withMeta(true)));
-    p.push_back(std::make_unique<juce::AudioParameterBool>(
-        juce::ParameterID{"phaseAware",1},"Legacy Phase",true,
-        juce::AudioParameterBoolAttributes().withAutomatable(false).withMeta(true)));
-    p.push_back(std::make_unique<juce::AudioParameterChoice>(
-        juce::ParameterID{"mode",1},"Legacy Mode (amplitude only)",juce::StringArray{"Legacy","Amplitude"},1,
-        juce::AudioParameterChoiceAttributes().withAutomatable(false).withMeta(true)));
-
     p.push_back(std::make_unique<juce::AudioParameterFloat>("scLow","Sidechain Low",logHzRange(),20.f));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("scHigh","Sidechain High",logHzRange(),20000.f));
     p.push_back(std::make_unique<juce::AudioParameterBool>("bypass","Bypass",false));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("msBalance","M/S balance",juce::NormalisableRange<float>(-1,1,.001f),0.f));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("duration","Duration",juce::NormalisableRange<float>(5,2000,1,.35f),2000.f));
-    legacyFloat("sustain","Legacy Sustain (fixed zero)",0.f,100.f,0.f);
     p.push_back(std::make_unique<juce::AudioParameterFloat>("processLow","Processing Low",logHzRange(),20.f));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("processHigh","Processing High",logHzRange(),20000.f));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("outputGain","Output Gain",juce::NormalisableRange<float>(-12.f,6.f,.01f),0.f));
@@ -126,12 +104,10 @@ void DuckPocketAudioProcessor::processAudio(juce::AudioBuffer<float>& b,juce::Mi
         traceTime+=step;
 
         if(!show){captured=0;continue;}
-        const float inLo=juce::jmin(v.dry[0],v.dry[1]),inHi=juce::jmax(v.dry[0],v.dry[1]);
         const float keyLo=juce::jmin(v.key[0],v.key[1]),keyHi=juce::jmax(v.key[0],v.key[1]);
         const float outLo=juce::jmin(v.out[0],v.out[1]),outHi=juce::jmax(v.out[0],v.out[1]);
-        if(!captured)capture={inLo,inHi,keyLo,keyHi,outLo,outHi,v.gain,traceTime};
+        if(!captured)capture={keyLo,keyHi,outLo,outHi,v.gain,traceTime};
         else {
-            capture.inLo=juce::jmin(capture.inLo,inLo); capture.inHi=juce::jmax(capture.inHi,inHi);
             capture.keyLo=juce::jmin(capture.keyLo,keyLo); capture.keyHi=juce::jmax(capture.keyHi,keyHi);
             capture.outLo=juce::jmin(capture.outLo,outLo); capture.outHi=juce::jmax(capture.outHi,outHi);
             capture.gain=juce::jmin(capture.gain,v.gain); capture.time=traceTime;
@@ -162,6 +138,14 @@ void DuckPocketAudioProcessor::setStateInformation(const void* d,int n)
 {
     if(auto x=getXmlFromBinary(d,n))if(x->hasTagName(parameters.state.getType())){
         auto state=juce::ValueTree::fromXml(*x);
+        // Older projects may contain parameter nodes that have no DSP meaning.
+        // Keep every active parameter value while discarding obsolete state.
+        for(int i=state.getNumChildren();--i>=0;){
+            const auto child=state.getChild(i);
+            const auto id=child.getProperty("id").toString();
+            if(juce::StringArray{"tolerance","low","high","maxReduction","release","phaseAware","mode","sustain"}.contains(id))
+                state.removeChild(i,nullptr);
+        }
         editorWidth.store(int(state.getProperty("uiWidth",0)));
         editorExpanded.store(bool(state.getProperty("uiExpanded",false)));
         parameters.replaceState(state);

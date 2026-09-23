@@ -1,22 +1,22 @@
-# Duck Pocket 0.10
+# Duck Pocket 1.0.0
 
 JUCE 8.0.4 sidechain VST3 / AAX by Rainline Music.
 
-## v0.10
+## v1.0.0
 
-- Display-synchronised UI capped at 60 fps.
-- High-resolution 2.4 kHz graph capture, 16k history, per-pixel min/max aggregation and interpolated curved envelopes.
+- Display-synchronised UI: 60 fps for short windows, 30 fps for 2–5 s windows.
+- High-resolution 2.4 kHz graph capture and 16k history; 2 ms extrema rollups and bounded paths for long windows.
 - Perspective tunnel graph grid in every theme.
 - New warm Amber theme alongside Neon, Solid Dark and Solid White.
 - Click-free 2.5 ms latency-aligned bypass crossfade.
-- Duration automation is latched per event and cannot jump an active envelope.
+- Duration automation follows an active envelope with smoothing.
 - Both audio channels are represented in the oscilloscope.
 - Dynamic filters use parked fast paths; the processor uses pointer-based block access.
 - High-DPI chrome uses the actual graphics-context scale and is not regenerated while range handles are dragged.
 - M/S percentages, centred range titles, edge-aligned live frequency labels, and persistent expanded-panel state.
-- Deprecated parameter IDs remain loadable but are marked as non-automatable metadata.
+- Old state values for removed controls are ignored while current settings are restored. Old automation for removed IDs cannot be restored.
 
-See `V010-NOTES.md` for implementation details and test coverage.
+See `PERFORMANCE-VALIDATION.md` for the Pro Tools macOS validation procedure and `V010-NOTES.md` for version history.
 
 ## Processing
 
@@ -26,6 +26,6 @@ Processing Range is a subtractive dynamic bell/shelf. The dry path is never perm
 
 ## Builds
 
-GitHub Actions builds macOS universal arm64+x86_64 and Windows x64 VST3/AAX packages, runs pluginval at strictness 5, and executes `PocketV10Test`.
+GitHub Actions builds macOS universal arm64+x86_64 and Windows x64 VST3/AAX packages, runs pluginval at strictness 5, and executes the current DSP tests.
 
 This is experimental software. Back up old projects and plug-ins before replacement.

@@ -93,9 +93,13 @@ private:
     std::unique_ptr<juce::VBlankAttachment> vblank;
 
     static constexpr int historyCapacity=16384;
+    static constexpr int summaryCapacity=4096;
     std::array<PocketTrace,historyCapacity> history{};
+    std::array<PocketTrace,summaryCapacity> summaryHistory{};
     int cursor=0,filled=0;
-    std::vector<PocketTrace> frozenGain,frozenScope;
+    int summaryCursor=0,summaryFilled=0;
+    long long summaryBin=-1;
+    std::vector<PocketTrace> frozenGain,frozenSummary;
     bool gainFrozen=false,scopeFrozen=false;
     double gainResume=0,scopeResume=0;
     bool expanded=false,ready=false,rangeGesture=false,processRangeGesture=false,capturingBlur=false,bypassTarget=false;
@@ -118,7 +122,7 @@ private:
     void saveSize();
     void setTheme(PocketTheme,bool persist=true);
     void showSettingsMenu();
-    void setHistoryWindow(bool gain,double seconds);
+    void setHistoryWindow(double seconds);
     void captureBlurSnapshot();
     void setFrozen(bool frozen);
     void invalidateChrome();
